@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="nb">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0d1117">
+<meta name="color-scheme" content="dark">
+<title>SSBMS</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="vendor/leaflet.css">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ============ INNLOGGING ============ -->
+<div id="login">
+  <div class="loginbox">
+    <div class="brand">
+      <div class="logo">SS<span>BMS</span></div>
+      <p class="tag">Super Simple Battlefield Management System</p>
+    </div>
+
+    <label class="fld">
+      <span class="lbl">Sesjonsnøkkel <em id="keyCount">0/18</em></span>
+      <input id="keyInput" inputmode="numeric" autocomplete="off" spellcheck="false"
+             placeholder="000000 000000 000000" maxlength="20">
+    </label>
+    <div id="keyInfo" class="keyinfo"></div>
+
+    <label class="fld">
+      <span class="lbl">Kallesignal</span>
+      <select id="callsign"></select>
+    </label>
+    <input id="callsignCustom" class="fld-input" placeholder="Eget kallesignal" style="display:none">
+
+    <label class="fld">
+      <span class="lbl">Navn <em>valgfritt</em></span>
+      <input id="unitName" maxlength="28" autocomplete="off" placeholder="f.eks. Troppssjef">
+    </label>
+    <label class="chk chk-login"><input type="checkbox" id="unitShowName" checked> Vis navnet på kartet</label>
+
+    <div id="loginErr" class="err"></div>
+
+    <button id="loginBtn" class="btn primary big">Åpne kart</button>
+    <button id="genKey" class="btn ghost">Generer ny nøkkel</button>
+
+    <details class="help">
+      <summary>Om nøkkelen</summary>
+      <p>18 siffer: <b>10</b> sesjonssiffer, <b>6</b> gridsiffer (AO-origo), <b>1</b> sonesiffer (2/3/5)
+      og <b>1</b> kontrollsiffer.</p>
+      <p>Sesjonssifrene gir tilgang til sesjonen og krypterer innholdet.
+      Gridsifrene styrer hvor kartdataene plottes — feil gridsiffer gir
+      <b>data, men systematisk forskjøvet posisjon</b>.</p>
+      <p class="warn">Dette er en delt hemmelighet, ikke et påloggingssystem.
+      Les README om hva det beskytter mot og ikke.</p>
+    </details>
+  </div>
+</div>
+
+<!-- ============ APPLIKASJON ============ -->
+<div id="app" style="display:none">
+
+  <header id="topbar">
+    <div class="own">
+      <div class="own-grid"><span id="ownGrid">—</span> <em id="ownAcc"></em></div>
+      <div class="own-sub">
+        <span class="tag" id="connTag">—</span>
+        <span class="tag muted" id="backendTag">—</span>
+        <span class="tag muted" id="queueTag"></span>
+        <span class="tag" id="swTag"></span>
+        <span class="tag muted" id="zulu"></span>
+      </div>
+    </div>
+    <div class="cursor mono" id="cursorGrid"></div>
+    <div class="tools">
+      <button id="btnGrid"  class="tbtn" title="Rutenett">#</button>
+      <button id="btnLayer" class="tbtn" title="Kartlag">🗺</button>
+      <button id="btnNight" class="tbtn" title="Nattmodus">🌙</button>
+      <button id="btnList"  class="tbtn" title="Liste">☰</button>
+      <button id="btnMenu"  class="tbtn" title="Meny">⋯</button>
+    </div>
+  </header>
+
+  <div id="modebar"></div>
+  <div id="map"></div>
+
+  <aside id="side">
+    <div class="side-head"><h2>Situasjon</h2><button id="sideClose" class="sheet-x">✕</button></div>
+    <div id="sideBody"></div>
+  </aside>
+
+  <div id="fabs">
+    <button id="btnCentre" class="fab" title="Sentrer på egen posisjon">◎</button>
+    <button id="btnSector" class="fab primary" title="Sektor og retning">⊿</button>
+    <button id="btnLoc"    class="fab" title="Lokasjon (infil/exfil/san/mål)">⚑</button>
+    <button id="btnUnit"   class="fab" title="Plasser enhet fra troppen">👥</button>
+    <button id="btnLos"    class="fab" title="Siktlinje">👁</button>
+  </div>
+
+  <footer id="quickwrap">
+    <div id="quickbar"></div>
+    <div id="quickaff"></div>
+    <p id="quickHint" class="hint"></p>
+  </footer>
+</div>
+
+<script src="vendor/leaflet.js"></script>
+<script src="vendor/proj4.js"></script>
+<script src="vendor/proj4leaflet.js"></script>
+<script src="vendor/supabase.js"></script>
+<script src="js/config.js"></script>
+<script src="js/keys.js"></script>
+<script src="js/geo.js"></script>
+<script src="js/symbols.js"></script>
+<script src="js/map.js"></script>
+<script src="js/store.js"></script>
+<script src="js/sync.js"></script>
+<script src="js/los.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

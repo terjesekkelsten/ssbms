@@ -1,0 +1,8 @@
+node_modules/
+.certs/
+*.tgz
+ex/
+.vercel
+js/config.local.js
+.DS_Store
+Thumbs.db
