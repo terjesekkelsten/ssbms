@@ -9,9 +9,9 @@ const SSBMSMap = (() => {
 
   const TILE_BASE = 'https://cache.kartverket.no/v1/wmts/1.0.0';
   const LAYERS = {
+    topograatone: 'Gråtone',
     topo: 'Topografisk',
     toporaster: 'Turkart',
-    topograatone: 'Gråtone',
     sjokartraster: 'Sjøkart'
   };
 
@@ -19,7 +19,10 @@ const SSBMSMap = (() => {
   let zone = 33;
   let tileLayer = null;
   let gridLayer = null;
-  let currentBase = 'topo';
+  // Gråtone er standard: symbolfargene (grønn/blå/grå/rød) er hele
+  // lesbarheten i dette kartet, og et fargerikt grunnkart konkurrerer med dem.
+  const DEFAULT_BASE = 'topograatone';
+  let currentBase = DEFAULT_BASE;
 
   /* ---------- CRS ---------- */
 
@@ -160,6 +163,11 @@ const SSBMSMap = (() => {
 
   function init(containerId, z, center) {
     zone = z;
+    // Brukerens siste kartvalg overlever reload.
+    try {
+      const saved = localStorage.getItem('ssbms:baseLayer');
+      if (saved && LAYERS[saved]) currentBase = saved;
+    } catch (e) { /* privat modus */ }
     map = L.map(containerId, {
       crs: buildCRS(z),
       center: center || [59.9, 10.6],
@@ -195,6 +203,7 @@ const SSBMSMap = (() => {
     if (!LAYERS[name] || !tileLayer) return;
     currentBase = name;
     tileLayer.setUrl(baseURL(name, zone));
+    try { localStorage.setItem('ssbms:baseLayer', name); } catch (e) { /* privat modus */ }
   }
 
   function setNight(on) {
@@ -238,7 +247,7 @@ const SSBMSMap = (() => {
   }
 
   return {
-    init, getMap, getZone, setBaseLayer, getBaseLayer,
+    init, getMap, getZone, setBaseLayer, getBaseLayer, DEFAULT_BASE,
     setNight, setGridVisible, refreshGrid, tileURLsForBounds,
     LAYERS
   };
