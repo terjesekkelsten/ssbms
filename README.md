@@ -263,20 +263,44 @@ Supabase-dashbordet og kjør `ssbms_purge()` etter øvelse.
 
 ---
 
-## Deploy til Vercel
+## Deploy
 
-Statisk, ingen bygging:
+Allerede satt opp:
+
+| | |
+|---|---|
+| Live | https://ssbms-inky.vercel.app |
+| GitHub | https://github.com/terjesekkelsten/ssbms (offentlig) |
+| Vercel-prosjekt | `ssbms` |
+
+Vercel er koblet til GitHub-repoet, så **en push til `main` deployer automatisk**.
+Ingen bygging — filene serveres som de er, og `vercel.json` setter cache-headerne.
 
 ```powershell
 cd C:\Users\sekke\SSBMS
-git init && git add -A && git commit -m "SSBMS"
-gh repo create ssbms --private --source=. --push
+git add -A
+git commit -m "beskrivelse av endringen"
+git push
 ```
 
-Koble repoet i Vercel. Framework preset: **Other**. Build command: tom.
-Output directory: `.` (rot).
+> **Én linje hver.** Windows PowerShell 5.1 — den som følger med Windows — støtter
+> ikke `&&`, og gir `The token '&&' is not a valid statement separator`. `;` virker,
+> men kjører videre selv om noe feiler: en feilet commit ville blitt fulgt av en
+> push som sender forrige versjon. Tre linjer stopper der det skal.
+> I PowerShell 7 (`pwsh`) virker `&&` som i bash.
 
-`vercel.json` er med og setter riktige cache-headere for service worker.
+Etter en deploy kan første lasting vise forrige versjon, fordi service workeren
+serverer cache først og oppdaterer i bakgrunnen. Ctrl+Shift+R henter ny med én gang.
+
+### Innstillinger som er satt bevisst
+
+- **Vercel Authentication er AV** — appen ligger åpent på nett, og nøkkelen er hele
+  tilgangskontrollen. Skrus på i Project Settings → Deployment Protection.
+- **Repoet er offentlig.** Ingen hemmeligheter i koden, men nøkkelformatet er
+  dokumentert her. Endres i GitHub Settings → Danger Zone.
+- Legger du Supabase-nøklene i `js/config.js`, blir `anonKey` synlig i det
+  offentlige repoet. Den er laget for å være offentlig og innholdet er kryptert,
+  men slå på rate limiting i Supabase-dashbordet.
 
 ---
 
