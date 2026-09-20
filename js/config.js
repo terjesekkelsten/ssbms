@@ -7,11 +7,17 @@
 window.SSBMS_CONFIG = {
 
   /* Supabase. La stå tom for lokal modus (synker kun faner på samme maskin).
-   * anonKey er en offentlig nøkkel - den er ment å ligge i klienten. Innholdet
-   * er uansett kryptert før det sendes. Se supabase/schema.sql. */
+   *
+   * publishableKey er Supabases nye navn på det som het «anon public». Den er
+   * ment å ligge i klienten og er offentlig - innholdet krypteres uansett før
+   * det sendes, og skjemaet slipper ingen til uten rom-ID. Se
+   * supabase/schema.sql.
+   *
+   * ADVARSEL: sb_secret_... (tidligere service_role) skal ALDRI inn her.
+   * Den omgår RLS og alle grants, og ville gjort hele skjemaet virkningsløst. */
   supabase: {
-    url: '',        // f.eks. 'https://abcdefgh.supabase.co'
-    anonKey: ''     // 'eyJhbGciOi...'
+    url: 'https://jucjxprexxjyjlijfrho.supabase.co',
+    publishableKey: 'sb_publishable_ofqrBW8vVq523-5I-fgYdQ_ITsJ6hBR'
   },
 
   /* Kallesignal i nedtrekkslista. Rediger fritt - det er kun forslag. */

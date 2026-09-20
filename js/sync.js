@@ -51,6 +51,7 @@ const SSBMSSync = (() => {
   function SupabaseBackend(cfg) {
     let client = null;
     let channel = null;
+    let ready = false;
 
     async function ingest(row) {
       const rec = await SSBMSKey.decryptJSON(aesKey, { iv: row.iv, ct: row.ct });
@@ -59,33 +60,47 @@ const SSBMSSync = (() => {
 
     return {
       name: 'supabase',
+
       async connect() {
-        client = window.supabase.createClient(cfg.url, cfg.anonKey, {
+        client = window.supabase.createClient(cfg.url, cfg.key, {
           realtime: { params: { eventsPerSecond: 20 } },
           auth: { persistSession: false }
         });
 
-        channel = client
-          .channel('ssbms:' + roomId)
-          .on('postgres_changes',
-            { event: '*', schema: 'public', table: 'ssbms_events', filter: 'room=eq.' + roomId },
-            payload => { if (payload.new) ingest(payload.new); })
-          .subscribe(status => {
-            SSBMSStore.setOnline(status === 'SUBSCRIBED', 'supabase');
+        /* Sanntid går over Broadcast på en kanal som heter rom-ID-en - ikke
+           over postgres_changes. postgres_changes ville krevd SELECT på
+           tabellen, og siden anonKey er offentlig (appen ligger åpent på nett)
+           hadde det latt hvem som helst abonnere på alle rom. Her må du kjenne
+           rom-ID-en for å i det hele tatt finne kanalen. */
+        channel = client.channel('ssbms:' + roomId, { config: { broadcast: { self: false } } });
+        channel.on('broadcast', { event: 'rec' }, msg => {
+          if (msg && msg.payload) ingest(msg.payload);
+        });
+
+        await new Promise(resolve => {
+          let settled = false;
+          const done = ok => { if (!settled) { settled = true; ready = ok; resolve(); } };
+          channel.subscribe(status => {
+            if (status === 'SUBSCRIBED') { SSBMSStore.setOnline(true, 'supabase'); done(true); }
+            else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+              SSBMSStore.setOnline(false, 'supabase'); done(false);
+            }
           });
+          setTimeout(() => done(ready), 12000);   // ikke heng for alltid
+        });
 
         await this.loadAll();
         return true;
       },
 
+      /** Henter romhistorikken. Databasen slipper oss ikke til uten rom-ID. */
       async loadAll() {
-        const { data, error } = await client
-          .from('ssbms_events')
-          .select('kind,ref,iv,ct,updated_at')
-          .eq('room', roomId)
-          .order('updated_at', { ascending: true })
-          .limit(2000);
-        if (error) { console.warn('[ssbms] lasting feilet', error.message); return; }
+        const { data, error } = await client.rpc('ssbms_fetch', { p_room: roomId });
+        if (error) {
+          console.warn('[ssbms] lasting feilet:', error.message);
+          SSBMSUI && SSBMSUI.toast && SSBMSUI.toast('Kunne ikke hente romdata: ' + error.message, 'warn');
+          return;
+        }
         for (const row of data || []) await ingest(row);
         SSBMSStore.emit('remote');
       },
@@ -93,25 +108,30 @@ const SSBMSSync = (() => {
       async send(item) {
         try {
           const env = await SSBMSKey.encryptJSON(aesKey, item.rec);
-          const { error } = await client.from('ssbms_events').upsert({
-            room: roomId,
-            kind: item.kind,
-            ref: item.ref,
-            iv: env.iv,
-            ct: env.ct,
-            updated_at: new Date().toISOString()
-          }, { onConflict: 'room,kind,ref' });
-          if (error) { console.warn('[ssbms] sending feilet', error.message); return false; }
+
+          // Lagres først, slik at en enhet som kobler til senere ser den.
+          const { error } = await client.rpc('ssbms_put', {
+            p_room: roomId, p_kind: item.kind, p_ref: item.ref,
+            p_iv: env.iv, p_ct: env.ct
+          });
+          if (error) { console.warn('[ssbms] sending feilet:', error.message); return false; }
+
+          // Så ut til dem som er på nå. Feiler dette, er raden likevel lagret,
+          // så vi regner sendingen som vellykket og lar mottakeren hente den.
+          if (channel) {
+            try { await channel.send({ type: 'broadcast', event: 'rec', payload: env }); }
+            catch (e) { console.warn('[ssbms] kringkasting feilet (raden er lagret):', e); }
+          }
           return true;
         } catch (e) {
-          console.warn('[ssbms] sending feilet', e);
+          console.warn('[ssbms] sending feilet:', e);
           return false;
         }
       },
 
       disconnect() {
-        if (channel) client.removeChannel(channel);
-        channel = null; client = null;
+        if (channel && client) client.removeChannel(channel);
+        channel = null; client = null; ready = false;
         SSBMSStore.setOnline(false);
       }
     };
@@ -130,10 +150,12 @@ const SSBMSSync = (() => {
     SSBMSStore.restore();
 
     const cfg = window.SSBMS_CONFIG || {};
-    const useSupabase = cfg.supabase && cfg.supabase.url &&
-      cfg.supabase.anonKey && window.supabase;
+    // publishableKey er det nye navnet; anonKey godtas fortsatt.
+    const sb = cfg.supabase || {};
+    const sbKey = sb.publishableKey || sb.anonKey;
+    const useSupabase = sb.url && sbKey && window.supabase;
 
-    backend = useSupabase ? SupabaseBackend(cfg.supabase) : LocalBackend();
+    backend = useSupabase ? SupabaseBackend({ url: sb.url, key: sbKey }) : LocalBackend();
     SSBMSStore.setSender(item => backend.send(item));
 
     try {

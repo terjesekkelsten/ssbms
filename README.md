@@ -253,13 +253,52 @@ Uten Supabase-konfigurasjon synker appen kun mellom faner på samme maskin via
 ubrukelig i felt.
 
 ### Supabase
-1. Lag et gratis prosjekt på supabase.com.
-2. Kjør `supabase/schema.sql` i SQL Editor.
-3. Fyll inn `url` og `anonKey` i `js/config.js` (Project Settings → API).
+1. Lag et gratis prosjekt på **supabase.com** (velg region `eu-north-1` Stockholm
+   eller `eu-central-1` Frankfurt — nærmest, og dataene blir i EØS).
+2. Åpne **SQL Editor** og kjør hele `supabase/schema.sql`.
+3. **Project Settings → API**: kopier `Project URL` og `anon public`-nøkkelen
+   inn i `js/config.js`.
+4. Commit og push. Merket øverst i appen skal si **SUPABASE**, ikke `KUN LOKALT`.
 
-`anonKey` er ment å ligge i klienten — den er offentlig. Innholdet er kryptert
-uansett. Rom-ID-en er hele tilgangskontrollen, så slå på rate limiting i
-Supabase-dashbordet og kjør `ssbms_purge()` etter øvelse.
+#### Hvorfor skjemaet ikke bruker vanlige RLS-policies
+
+`anonKey` står i klientkoden på et offentlig nettsted. Den er offentlig uansett,
+og et privat repo endrer ikke på det. Skjemaet kan derfor ikke anta at nøkkelen
+er hemmelig.
+
+Med den naive varianten — RLS `using (true)` og direkte tabelltilgang — kunne
+hvem som helst med den nøkkelen dumpe **hele** tabellen (all chiffertekst, alle
+rom-ID-er, tidsstempler, aktivitetsmønstre) og overskrive **hvilken som helst**
+rad. Klienten forkaster data som ikke lar seg dekryptere, så en enhet ville bare
+forsvinne fra kartet.
+
+I stedet har tabellen **ingen** policies og ingen rettigheter for `anon`. All
+tilgang går gjennom to funksjoner som begge krever rom-ID-en:
+
+| | |
+|---|---|
+| `ssbms_fetch(rom)` | returnerer kun det rommets rader |
+| `ssbms_put(rom, type, ref, iv, ct)` | validerer form og størrelse, upserter én rad |
+
+Rom-ID er SHA-256 av de ti sesjonssifrene, så uten nøkkelen finnes ingen
+inngang — verken til å lese eller skrive.
+
+Sanntid går over **Broadcast** på en kanal som heter rom-ID-en, ikke over
+`postgres_changes`. Samme grunn: `postgres_changes` ville krevd `SELECT` på
+tabellen og dermed åpnet for å abonnere på alt.
+
+Verifisert mot en ekte PostgreSQL 16: direkte `select`, `insert`, `update` og
+`delete` som rollen `anon` avvises alle med *permission denied*; ugyldig
+rom-ID, ugyldig type og for stor nyttelast avvises av funksjonene; `ssbms_purge`
+kan ikke kalles fra klienten.
+
+#### Hva det fortsatt ikke beskytter mot
+
+- Den som har nøkkelen har full tilgang til sitt rom. Det er designet.
+- Sesjonsdelen er ti siffer (~33 bit) — se avsnittet om nøkkelen over.
+- Trafikkmønster er synlig for Supabase uansett kryptering.
+
+Slå på rate limiting (Settings → API) og kjør `ssbms_purge()` etter øvelse.
 
 ---
 
