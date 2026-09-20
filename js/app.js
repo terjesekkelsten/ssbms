@@ -1357,6 +1357,7 @@
       <button class="mi" id="mSelfName">🏷 Navn på egen enhet (${St.state.selfName || 'ikke satt'})</button>
       <button class="mi" id="mLabels">${labelsOn ? '🙈 Skjul alle enhetsnavn (kun her)' : '👁 Vis alle enhetsnavn'}</button>
       <button class="mi" id="mOffline">⬇ Last ned kart for offline bruk</button>
+      <button class="mi" id="mUpdate">🔄 Tving oppdatering av appen</button>
       <button class="mi" id="mExport">💾 Eksporter GeoJSON</button>
       <button class="mi" id="mKey">🔑 Vis sesjonsinfo</button>
       <button class="mi danger" id="mWipe">🗑 Slett alt og logg ut</button>`);
@@ -1384,13 +1385,25 @@
       SSBMSUI.toast(labelsOn ? 'Enhetsnavn vises.' : 'Enhetsnavn skjult på denne enheten.');
     };
     body.querySelector('#mOffline').onclick = () => { sh.close(); downloadTiles(); };
+    body.querySelector('#mUpdate').onclick = () => { sh.close(); forceUpdate(); };
     body.querySelector('#mExport').onclick = () => { sh.close(); exportGeoJSON(); };
     body.querySelector('#mKey').onclick = () => { sh.close(); showSessionInfo(); };
     body.querySelector('#mWipe').onclick = () => {
       if (!confirm('Slette all lokal data og logge ut? Kan ikke angres.')) return;
       St.wipe();
-      if (window.caches) caches.keys().then(ks => ks.forEach(k => caches.delete(k)));
-      location.reload();
+      (async () => {
+        try {
+          if (window.caches) {
+            const ks = await caches.keys();
+            await Promise.all(ks.map(k => caches.delete(k)));
+          }
+          if (navigator.serviceWorker) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map(r => r.unregister()));
+          }
+        } catch (e) { /* uansett: last på nytt */ }
+        location.replace(location.pathname);
+      })();
     };
   }
 
@@ -1410,6 +1423,27 @@
       <p class="caveat">Rom-ID og tidsstempler er synlige for tjenesten. Posisjoner og tekst er det ikke.
       Nøkkelens sesjonsdel er 10 siffer - se README om hva det faktisk beskytter mot.</p>`);
     SSBMSUI.sheet({ title: 'Sesjon', body });
+  }
+
+  /* En vei ut av en fastlåst cache uten å grave i nettleserinnstillinger.
+     Tømmer appcachen og registrerer service workeren på nytt - kartflisene og
+     sesjonsdataene røres ikke. */
+  async function forceUpdate() {
+    SSBMSUI.toast('Henter siste versjon…');
+    try {
+      if (window.caches) {
+        const names = await caches.keys();
+        await Promise.all(names.filter(n => n.startsWith('ssbms-app')).map(n => caches.delete(n)));
+      }
+      if (navigator.serviceWorker) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r => r.unregister()));
+      }
+    } catch (e) {
+      console.warn('[ssbms] oppdatering:', e);
+    }
+    // Omgå nettleserens egen cache på selve omlastingen.
+    location.replace(location.pathname + '?oppdatert=' + Date.now());
   }
 
   async function downloadTiles() {
