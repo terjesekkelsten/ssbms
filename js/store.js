@@ -262,10 +262,13 @@ const SSBMSStore = (() => {
     };
   }
 
-  function makeLoc({ e, n, kind, desc, id }) {
+  function makeLoc({ e, n, kind, name, desc, id }) {
     const { de, dn } = toLocal(e, n);
     return {
       t: 'loc', id: id || uid(), kind, de, dn,
+      /* Navnet vises under symbolet på kartet hos alle. Tomt navn = ingen
+         etikett; en tom boks under symbolet er verre enn ingen boks. */
+      name: (name || '').trim().slice(0, 24),
       desc: desc || '', by: state.self, ts: now(), deleted: false
     };
   }

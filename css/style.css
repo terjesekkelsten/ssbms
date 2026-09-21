@@ -539,3 +539,12 @@ label.chk input[type=checkbox] {
 /* ---------- Alder i ark ---------- */
 .kv .age { color: var(--fg-dim); font-weight: 600; }
 .kv .age.stale { color: var(--warn); }
+
+/* ---------- Navn under lokasjonssymbol ---------- */
+.loc-label {
+  display: inline-block; max-width: 160px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; padding: 2px 7px; border-radius: 5px;
+  font: 700 11px/1.3 ui-monospace, Menlo, Consolas, monospace; letter-spacing: .4px;
+  color: var(--c); background: rgba(13,17,23,.82); border: 1px solid var(--c);
+  text-shadow: 0 1px 2px rgba(0,0,0,.9);
+}

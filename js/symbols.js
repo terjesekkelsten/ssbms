@@ -31,13 +31,19 @@ const SSBMSSymbols = (() => {
   };
   const POI_ORDER = ['personell', 'kjoretoy', 'drone', 'ied', 'bygning'];
 
+  /* named: true betyr at lokasjonen normalt bærer et navn - «OP 1»,
+     «SKSK Nord». Arket åpnes da rett etter plassering, slik at navnet settes
+     mens du husker hva du så. De øvrige kan også navngis, men gjør det
+     sjelden, og skal ikke avbrytes av et ark. */
   const LOC = {
     infil: { label: 'Infil', color: '#00c853' },
     exfil: { label: 'Exfil', color: '#ffab00' },
     sanplass: { label: 'Sanplass', color: '#ff1744' },
-    maal: { label: 'Mål', color: '#e040fb' }
+    maal: { label: 'Mål', color: '#e040fb' },
+    sksk: { label: 'SKSK', color: '#00b8d4', named: true },
+    op: { label: 'OP', color: '#b388ff', named: true }
   };
-  const LOC_ORDER = ['infil', 'exfil', 'sanplass', 'maal'];
+  const LOC_ORDER = ['infil', 'exfil', 'sanplass', 'maal', 'sksk', 'op'];
 
   /* ---------- tegning ---------- */
 
@@ -113,6 +119,12 @@ const SSBMSSymbols = (() => {
     return svgWrap(inner, size);
   }
 
+  function locText(color, text) {
+    return `<text x="24" y="24.5" text-anchor="middle" dominant-baseline="central"
+      font-family="ui-monospace,Menlo,Consolas,monospace" font-weight="700"
+      font-size="16" fill="${color}">${text}</text>`;
+  }
+
   function locSVG(kind, size = 32) {
     const c = (LOC[kind] || LOC.maal).color;
     let inner = `<circle cx="24" cy="24" r="17" fill="#000" fill-opacity="0.45"/>` +
@@ -130,6 +142,19 @@ const SSBMSSymbols = (() => {
       case 'maal':
         inner += `<circle cx="24" cy="24" r="8" fill="none" stroke="${c}" stroke-width="3"/>` +
           `<path d="M24 6 V14 M24 34 V42 M6 24 H14 M34 24 H42" stroke="${c}" stroke-width="3" stroke-linecap="round"/>`;
+        break;
+      /* SKSK og OP bærer forkortelsen i stedet for en figur.
+         Testet ved faktisk kartstørrelse (32 px): et trådkors for SKSK var
+         ikke til å skille fra «mål» når det eneste skillet var fargen - og i
+         nattmodus forsvinner fargeforskjellen helt. Fire tegn («SKSK») blir
+         grøt på den plassen; to tegn leses rent. De fire øvrige beholder
+         figurene sine: de beskriver en handling (inn, ut, sanitet, mål),
+         mens disse to er poster som folk uansett skriver med forkortelse. */
+      case 'sksk':
+        inner += locText(c, 'SK');
+        break;
+      case 'op':
+        inner += locText(c, 'OP');
         break;
     }
     return svgWrap(inner, size);

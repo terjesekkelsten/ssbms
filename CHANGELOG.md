@@ -68,6 +68,19 @@ Ingenting ennå.
   og transportfeil gis åtte forsøk før posten gis opp.
 - **Snarvei til sektorarket.** Trykk på egen enhet på kartet → «Sektor og
   retning» rett i arket.
+- **To nye lokasjonstyper: SKSK og OP.** Begge bærer forkortelsen i symbolet
+  i stedet for en figur. Testet ved faktisk kartstørrelse: et trådkors for
+  SKSK var ikke til å skille fra «Mål» når fargen var det eneste skillet — og
+  i nattmodus forsvinner fargeforskjellen. «SKSK» blir grøt på den plassen;
+  to tegn leses rent. De fire øvrige beholder figurene sine: de beskriver en
+  handling (inn, ut, sanitet, mål), mens disse to er poster som uansett
+  skrives med forkortelse.
+- **Navn under lokasjonssymbolet.** Alle lokasjoner kan navngis — «OP 1»,
+  «SKSK Nord» — og navnet legger seg under symbolet i lokasjonens egen farge.
+  Uten navn ingen etikett. For SKSK og OP åpnes navnefeltet automatisk rett
+  etter plassering: navnet er hele poenget med dem, og «OP 1» er forskjellen
+  på et brukbart kart og en håndfull identiske ringer i morgen. Navnet følger
+  med i lista, i koblingsetikettene og i GeoJSON-eksporten.
 - **Aldersfilter på observasjoner.** ⏱ i verktøylinja skjuler observasjoner
   eldre enn 15 min, 1, 4, 12 eller 24 timer. Filteret måler mot
   observasjonstidspunktet, ikke mot når posten sist ble redigert — en

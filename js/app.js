@@ -377,8 +377,12 @@
         case 'loc': {
           const kind = pending.locKind;
           setPending(null);
-          St.publish(St.makeLoc({ e: E, n: N, kind }));
+          const rec = St.makeLoc({ e: E, n: N, kind });
+          St.publish(rec);
           SSBMSUI.toast(`${S.LOC[kind].label} · ${G.toShortGrid(E, N)}`);
+          // SKSK og OP bærer normalt et navn. Å be om det med en gang er
+          // forskjellen på «OP 1» og en håndfull identiske ringer i morgen.
+          if (S.LOC[kind].named) openLocSheet(rec, { focusName: true });
           return;
         }
 
@@ -664,15 +668,31 @@
   function renderLocs() {
     syncLayer('locs', St.activeLocs(), r => r.id, rec => {
       const ll = St.recordLatLng(rec);
+      const g = L.layerGroup();
       const m = L.marker([ll.lat, ll.lng], {
         icon: icon(S.locSVG(rec.kind), [32, 32]),
-        title: S.LOC[rec.kind].label
+        title: locLabel(rec)
       });
       m.on('click', () => {
         if (isArmed('link')) return handleLinkClick(rec);
         openLocSheet(rec);
       });
-      return m;
+      g.addLayer(m);
+
+      /* Navnet legger seg under symbolet, i lokasjonens egen farge. Tomt navn
+         gir ingen etikett - en tom boks under symbolet ville bare tatt plass.
+         Etiketten er ikke klikkbar: den skal ikke stjele trykket fra symbolet
+         eller fra et punkt rett bak den. */
+      if (rec.name) {
+        g.addLayer(L.marker([ll.lat, ll.lng], {
+          icon: L.divIcon({
+            html: `<div class="ulabel-wrap"><span class="loc-label" style="--c:${S.LOC[rec.kind].color}">${escapeHtml(rec.name)}</span></div>`,
+            className: 'sym ulabel', iconSize: [180, 22], iconAnchor: [90, -18]
+          }),
+          interactive: false, zIndexOffset: 200
+        }));
+      }
+      return g;
     });
   }
 
@@ -681,11 +701,21 @@
    *  Tegning: streker, piler og koblinger
    * ========================================================= */
 
+  /**
+   * «OP 1», ikke «OP OP 1». Kaller du en OP for «OP 1», er typen allerede
+   * sagt — og i felt skriver folk nettopp slik.
+   */
+  function locLabel(rec) {
+    const l = S.LOC[rec.kind].label;
+    if (!rec.name) return l;
+    return rec.name.toLowerCase().startsWith(l.toLowerCase()) ? rec.name : `${l} ${rec.name}`;
+  }
+
   /** Kort, lesbart navn på en post. Brukes i koblingsarket og i meldingene. */
   function recLabel(rec) {
     if (!rec) return '—';
     if (rec.t === 'poi') return `${S.POI[rec.type].label}${rec.count ? ' ×' + rec.count : ''} (${S.AFFIL[rec.affil].label.toLowerCase()})`;
-    if (rec.t === 'loc') return S.LOC[rec.kind].label;
+    if (rec.t === 'loc') return locLabel(rec);
     if (rec.t === 'pos') return St.displayName(rec) || rec.cs;
     return '—';
   }
@@ -1130,20 +1160,24 @@
     });
   }
 
-  function openLocSheet(rec) {
+  function openLocSheet(rec, { focusName = false } = {}) {
     const body = el('div', '', `
       <div class="kv"><span>Rute</span><b class="mono">${gridLine(rec)}</b></div>
       <div class="kv"><span>Meldt av</span><b>${rec.by || '—'}</b></div>
+      <label>Navn <span class="opt">vises under symbolet</span>
+        <input id="lName" maxlength="24" value="${escapeHtml(rec.name || '')}"
+               placeholder="f.eks. ${S.LOC[rec.kind].named ? S.LOC[rec.kind].label + ' 1' : 'Alfa'}"></label>
       <label>Type <select id="lKind">${S.LOC_ORDER.map(k =>
         `<option value="${k}"${k === rec.kind ? ' selected' : ''}>${S.LOC[k].label}</option>`).join('')}</select></label>
       <label>Beskrivelse <textarea id="lDesc" rows="2">${escapeHtml(rec.desc || '')}</textarea></label>`);
-    SSBMSUI.sheet({
-      title: S.LOC[rec.kind].label, body,
+    const sh = SSBMSUI.sheet({
+      title: locLabel(rec), body,
       actions: [
         {
           label: 'Lagre', kind: 'primary', onClick: close => {
             St.publish({
               ...rec, kind: body.querySelector('#lKind').value,
+              name: body.querySelector('#lName').value.trim().slice(0, 24),
               desc: body.querySelector('#lDesc').value, ts: Date.now()
             });
             close();
@@ -1152,6 +1186,13 @@
         { label: 'Slett', kind: 'danger', onClick: close => { St.remove(rec); close(); } }
       ]
     });
+    if (focusName) {
+      const inp = body.querySelector('#lName');
+      // Uten forsinkelsen er arket ikke ferdig animert inn, og iOS gir fra seg
+      // fokus igjen uten å åpne tastaturet.
+      setTimeout(() => { inp.focus(); inp.select(); }, 250);
+    }
+    return sh;
   }
 
   /* =========================================================
@@ -1853,6 +1894,7 @@
       (locs.map(r => `<div class="row" data-goto="${r.id}" data-kind="loc">
           <span class="dot" style="--c:${S.LOC[r.kind].color}"></span>
           <b>${S.LOC[r.kind].label}</b>
+          ${r.name ? `<span class="rname">${escapeHtml(r.name)}</span>` : ''}
           <span class="mono">${G.toShortGrid(St.recordUTM(r).e, St.recordUTM(r).n)}</span></div>`).join('') || '<p class="muted">Ingen.</p>');
 
     box.querySelectorAll('[data-goto]').forEach(row => {
@@ -2029,7 +2071,7 @@
       kategori: 'observasjon', type: r.type, tilhorighet: r.affil,
       antall: r.count, beskrivelse: r.desc, bevegelse: r.mov || null, meldt_av: r.by
     }));
-    St.activeLocs().forEach(r => push(r, { kategori: 'lokasjon', type: r.kind, beskrivelse: r.desc }));
+    St.activeLocs().forEach(r => push(r, { kategori: 'lokasjon', type: r.kind, navn: r.name || null, beskrivelse: r.desc }));
 
     St.activeDraws().forEach(r => {
       const pts = drawUTM(r);
