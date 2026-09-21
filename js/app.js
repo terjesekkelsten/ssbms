@@ -440,16 +440,30 @@
       return;
     }
     bar.classList.add('on');
-    const done = p.kind === 'draw' && p.pts.length >= 2;
-    bar.innerHTML = `<span class="mb-dot"></span><span class="mb-text">${pendingLabel(p)}</span>
-      ${done ? '<button class="mb-ok" type="button">Ferdig</button>' : ''}
-      ${p.kind === 'draw' && p.pts.length ? '<button class="mb-undo" type="button">Angre</button>' : ''}
-      <button class="mb-x" type="button">Avbryt</button>`;
-    bar.querySelector('.mb-x').onclick = () => setPending(null);
-    const ok = bar.querySelector('.mb-ok');
-    if (ok) ok.onclick = finishDraw;
-    const un = bar.querySelector('.mb-undo');
-    if (un) un.onclick = () => { p.pts.pop(); renderDraft(); renderModebar(); };
+
+    /* Rekkefølgen er fast — Ferdig, Angre, Avbryt — slik at knappen du trenger
+       ligger samme sted uansett modus. I koblingsmodus finnes ingen Avbryt:
+       koblingene er allerede delt i det de lages, og en knapp som ser ut som
+       den angrer dem ville løyet. */
+    const btns = [];
+    if (p.kind === 'draw') {
+      if (p.pts.length >= 2) btns.push(['mb-ok', 'Ferdig', finishDraw]);
+      if (p.pts.length) btns.push(['mb-undo', 'Angre', () => { p.pts.pop(); renderDraft(); renderModebar(); }]);
+      btns.push(['mb-x', 'Avbryt', () => setPending(null)]);
+    } else if (p.kind === 'link') {
+      btns.push(['mb-ok', 'Ferdig', finishLinking]);
+      if (p.a) btns.push(['mb-undo', 'Angre valg', () => { p.a = null; p.aLabel = null; renderModebar(); }]);
+    } else {
+      btns.push(['mb-x', 'Avbryt', () => setPending(null)]);
+    }
+
+    bar.innerHTML = `<span class="mb-dot"></span><span class="mb-text">${pendingLabel(p)}</span>`;
+    btns.forEach(([cls, label, fn]) => {
+      const b = el('button', cls, label);
+      b.type = 'button';
+      b.onclick = fn;
+      bar.appendChild(b);
+    });
   }
 
   function pendingLabel(p) {
@@ -462,9 +476,13 @@
       case 'draw': return `${p.dash ? 'Stiplet ' : ''}${p.style === 'arrow' ? 'pil' : 'strek'} (${
         S.DRAW[p.color].label.toLowerCase()}) — ${
         p.pts.length < 2 ? 'trykk i kartet' : p.pts.length + ' punkter'}`;
-      case 'link': return p.a
-        ? `Koble fra ${p.aLabel} — trykk det andre punktet`
-        : 'Koble — trykk første observasjon eller lokasjon';
+      case 'link': {
+        const n = p.made || 0;
+        const teller = n ? ` · ${n} laget` : '';
+        return (p.a
+          ? `Koble fra ${p.aLabel} — trykk det andre punktet`
+          : 'Koble — trykk et punkt, så neste') + teller;
+      }
       default: return 'Armert';
     }
   }
@@ -795,12 +813,40 @@
       return;
     }
     if (pending.a === rec.id) return SSBMSUI.toast('Velg et annet punkt.', 'warn');
+
     const link = { a: pending.a, b: rec.id };
-    const color = pending.color, style = pending.style, dash = pending.dash;
+
+    /* Med kjeding blir dobbeltkobling lett gjort: du lager A→B, glemmer det,
+       og lager B→A rett etterpå. To streker oppå hverandre ser ut som én, og
+       den ene blir umulig å treffe for å slette. Retningen teller ikke -
+       en kobling er en kobling. */
+    const finnes = St.activeDraws().some(d => d.link &&
+      ((d.link.a === link.a && d.link.b === link.b) ||
+       (d.link.a === link.b && d.link.b === link.a)));
+    if (finnes) {
+      pending.a = null; pending.aLabel = null;
+      renderModebar();
+      return SSBMSUI.toast('Disse to er allerede koblet.', 'warn');
+    }
+
     const fra = pending.aLabel, til = recLabel(rec);
+    St.publish(St.makeDraw({
+      pts: [], style: pending.style, color: pending.color, dash: pending.dash, link
+    }));
+
+    // Bli stående i modus: en rute er flere koblinger på rad, og å måtte innom
+    // Oppdrag-arket mellom hver ville gjort funksjonen ubrukelig i felt.
+    pending.a = null;
+    pending.aLabel = null;
+    pending.made = (pending.made || 0) + 1;
+    renderModebar();
+    SSBMSUI.toast(`Koblet: ${fra} → ${til}. Trykk neste punkt, eller «Ferdig».`);
+  }
+
+  function finishLinking() {
+    const n = (pending && pending.made) || 0;
     setPending(null);
-    St.publish(St.makeDraw({ pts: [], style, color, dash, link }));
-    SSBMSUI.toast(`Koblet: ${fra} → ${til}.`);
+    if (n) SSBMSUI.toast(`${n} kobling${n === 1 ? '' : 'er'} laget.`);
   }
 
   function openDrawSheet(rec) {
@@ -1358,15 +1404,20 @@
         return SSBMSUI.toast('Det må finnes minst to observasjoner eller lokasjoner å koble.', 'warn');
       }
       sh.close();
-      setPending({ kind: 'link', style: 'arrow', color: drawPick.color, dash: drawPick.dash, a: null });
-      SSBMSUI.toast('Trykk den første observasjonen eller lokasjonen.');
+      /* Koblinger starter alltid stiplet, uavhengig av bryteren over: stiplet
+         er det som skiller «disse to hører sammen» fra en strek du har tegnet
+         for hånd. Vil du ha den heltrukken, endrer du det på den enkelte
+         streken etterpå. */
+      setPending({ kind: 'link', style: 'arrow', color: drawPick.color, dash: true, a: null, made: 0 });
+      SSBMSUI.toast('Trykk punktene to og to. Du blir i koblingsmodus til du trykker «Ferdig».');
     });
     body.appendChild(dp);
 
     const n = St.activeDraws().length;
     body.appendChild(el('p', 'muted small',
-      n ? `${n} tegning${n === 1 ? '' : 'er'} på kartet. Trykk på en strek for å endre farge eller slette den.`
-        : 'Trykk på en ferdig strek i kartet for å endre farge eller slette den.'));
+      (n ? `${n} tegning${n === 1 ? '' : 'er'} på kartet. ` : '') +
+      'Trykk på en strek i kartet for å endre farge, form eller stipling, eller slette den. ' +
+      'Koblinger starter alltid stiplet.'));
 
     const actions = [];
     if (n) actions.push({ label: 'Slett alle tegninger', kind: 'danger', onClick: close => {

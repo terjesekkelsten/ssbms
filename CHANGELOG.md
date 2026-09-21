@@ -43,9 +43,19 @@ Ingenting ennå.
   observasjon til målet den hører til. Streken følger de to punktene: flytter
   et av dem seg, flytter koblingen seg med. Slettes eller skjules et av dem,
   forsvinner streken — en kobling til noe som ikke finnes er verre enn ingen
-  kobling. Modelinja og arket viser hva som er koblet («Infil → Mål»).
-  Koblinger følger samme stiplevalg som resten; trykk på streken for å se om
-  den er en kobling.
+  kobling.
+  - Du blir **stående i koblingsmodus** til du trykker «Ferdig». En rute er
+    flere koblinger på rad, og å måtte innom Oppdrag-arket mellom hver ville
+    gjort funksjonen ubrukelig i felt. Modelinja teller hvor mange du har
+    laget.
+  - Koblinger starter **alltid stiplet**, uavhengig av strektypebryteren:
+    stiplet er det som skiller «disse to hører sammen» fra en strek du har
+    tegnet for hånd. Vil du ha den heltrukken, endrer du det på den enkelte
+    streken etterpå.
+  - Samme par kan ikke kobles to ganger, heller ikke motsatt vei. Med kjeding
+    er det lett gjort, og to streker oppå hverandre ser ut som én — den ene
+    ville blitt umulig å treffe for å slette.
+  - Modelinja og arket viser hva som er koblet («Infil → Mål»).
 - **Bilder på observasjoner og egen sektor.** Egne knapper for **Ta bilde**
   og **Velg bilde** — på iPhone åpner `capture="environment"` kameraet direkte
   og fjerner fotobiblioteket fra valgene, så begge deler må finnes. Bildet
@@ -75,7 +85,9 @@ Ingenting ennå.
 ### Endret
 
 - Bygningsobservasjoner heter **BYGG** i hurtiglinja, ikke BYG.
-- Modelinja har fått **Ferdig** og **Angre** når du tegner.
+- Modelinja har fått **Ferdig** og **Angre** når du tegner, og **Ferdig** og
+  **Angre valg** når du kobler. Koblingsmodus har ingen «Avbryt»: koblingene
+  er delt i det de lages, og en knapp som så ut som den angret dem ville løyet.
 - Hurtigmenyen (langtrykk) er slått av mens du tegner, kobler eller måler
   siktlinje. Et langtrykk midt i en strek skal legge et punkt, ikke plassere
   en observasjon.
