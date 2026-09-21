@@ -147,6 +147,8 @@ body.night .leaflet-control-attribution { background: rgba(0,0,0,.7); color: #a8
 .tag.ok { background: rgba(0,200,83,.16); color: var(--accent); }
 .tag.bad { background: rgba(255,23,68,.16); color: var(--danger); }
 .tag.emcon { background: rgba(255,171,0,.18); color: var(--warn); }
+/* Tomme merker skal ikke etterlate en liten farget klump i topplinja. */
+.tag:empty { display: none; }
 .cursor { font-size: 11px; color: var(--fg-dim); display: none; }
 @media (min-width: 900px) { .cursor { display: block; } }
 

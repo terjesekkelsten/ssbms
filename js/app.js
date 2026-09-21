@@ -635,7 +635,7 @@
       dashArray: dashed ? '8 6' : null,
       interactive: !!onClick
     });
-    if (onClick) line.on('click', ev => { L.DomEvent.stop(ev); onClick(); });
+    if (onClick) line.on('click', ev => { L.DomEvent.stop(ev.originalEvent || ev); onClick(); });
     line.addTo(layer);
 
     if (style === 'arrow' && pts.length >= 2) {
