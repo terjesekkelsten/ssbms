@@ -17,6 +17,8 @@ const SSBMSStore = (() => {
     units: new Map(),   // kallesignal -> record
     pois: new Map(),    // id -> record
     locs: new Map(),    // id -> record
+    draws: new Map(),   // id -> strek/pil
+    photos: new Map(),  // id -> miniatyrbilde knyttet til en enhet eller observasjon
     selfName: '',        // valgfritt klartekstnavn på egen enhet
     selfShowName: true,  // om navnet vises på kartet
     outbox: [],
@@ -56,7 +58,9 @@ const SSBMSStore = (() => {
       localStorage.setItem(storageKey('data'), JSON.stringify({
         units: [...state.units.values()],
         pois: [...state.pois.values()],
-        locs: [...state.locs.values()]
+        locs: [...state.locs.values()],
+        draws: [...state.draws.values()],
+        photos: [...state.photos.values()]
       }));
       localStorage.setItem(storageKey('outbox'), JSON.stringify(state.outbox));
     } catch (e) { /* full disk / privat modus - ikke kritisk */ }
@@ -70,6 +74,8 @@ const SSBMSStore = (() => {
         (d.units || []).forEach(r => state.units.set(r.id, r));
         (d.pois || []).forEach(r => state.pois.set(r.id, r));
         (d.locs || []).forEach(r => state.locs.set(r.id, r));
+        (d.draws || []).forEach(r => state.draws.set(r.id, r));
+        (d.photos || []).forEach(r => state.photos.set(r.id, r));
       }
       const ob = localStorage.getItem(storageKey('outbox'));
       if (ob) state.outbox = JSON.parse(ob) || [];
@@ -113,12 +119,22 @@ const SSBMSStore = (() => {
         .forEach(k => localStorage.removeItem(k));
     } catch (e) { /* ignorer */ }
     state.units.clear(); state.pois.clear(); state.locs.clear();
+    state.draws.clear(); state.photos.clear();
     state.outbox = [];
   }
 
   /* ---------- innkommende ---------- */
 
-  const BUCKET = { pos: 'units', poi: 'pois', loc: 'locs' };
+  const BUCKET = { pos: 'units', poi: 'pois', loc: 'locs', drw: 'draws', pho: 'photos' };
+
+  /* Transportetiketten er noe annet enn posttypen. ssbms_put i Supabase har en
+     check-constraint pa ('pos','poi','loc'), og a utvide den ville krevd en
+     skjemamigrering som MA kjores for appen deployes - glemmes den, feiler
+     sendingen, og siden koen stopper pa forste feil ville en enkelt strek
+     blokkert ogsa posisjonsrapportene. Derfor reiser tegninger og bilder som
+     'loc'. Primaernokkelen er (rom, kind, ref) og ref er en uid, sa det kan
+     ikke kollidere. Innholdet er kryptert uansett; serveren ser bare etiketten. */
+  const TRANSPORT = { pos: 'pos', poi: 'poi', loc: 'loc', drw: 'loc', pho: 'loc' };
 
   function apply(rec, { local = false } = {}) {
     if (!rec || !rec.t || !rec.id) return false;
@@ -140,7 +156,7 @@ const SSBMSStore = (() => {
   async function publish(rec) {
     apply(rec, { local: true });
     if (state.emcon) return;                       // lyttemodus: ingen utsending
-    state.outbox.push({ kind: rec.t, ref: rec.id, rec });
+    state.outbox.push({ kind: TRANSPORT[rec.t] || rec.t, ref: rec.id, rec });
     persist();
     flush();
   }
@@ -224,6 +240,43 @@ const SSBMSStore = (() => {
     };
   }
 
+  /**
+   * Strek eller pil. Punktene lagres som avstand fra AO-origo, som alt annet.
+   * link != null betyr at streken folger to observasjoner i stedet for faste
+   * punkter - da flytter den seg med dem, og forsvinner hvis en av dem slettes.
+   */
+  function makeDraw({ pts, style, color, desc, id, link, by, ts }) {
+    return {
+      t: 'drw', id: id || uid(),
+      style: style === 'arrow' ? 'arrow' : 'line',
+      color: color || 'sort',
+      pts: (pts || []).map(p => { const l = toLocal(p.e, p.n); return [l.de, l.dn]; }),
+      link: link || null,
+      desc: desc || '',
+      by: by || state.self, ts: ts || now(), deleted: false
+    };
+  }
+
+  function drawLatLngs(rec) {
+    return (rec.pts || []).map(([de, dn]) => {
+      const { e, n } = fromLocal(de, dn);
+      return SSBMSGeo.toLatLng(e, n, state.key.zone);
+    });
+  }
+
+  /**
+   * Miniatyrbilde. Egen post, ikke et felt pa posisjonen: posisjonen sendes pa
+   * nytt hvert 15. sekund, og a dra med seg 10 kB bilde hver gang ville brent
+   * bade batteri og kvote til ingen nytte.
+   *   ref = kallesignal (bilde fra en observasjonssektor) eller POI-id.
+   */
+  function makePhoto({ ref, img, desc, id }) {
+    return {
+      t: 'pho', id: id || uid(), ref, img,
+      desc: desc || '', by: state.self, ts: now(), deleted: false
+    };
+  }
+
   function remove(rec) {
     const copy = { ...rec, deleted: true, ts: now() };
     return publish(copy);
@@ -234,6 +287,10 @@ const SSBMSStore = (() => {
   function activePOIs() { return [...state.pois.values()].filter(r => !r.deleted); }
   function activeLocs() { return [...state.locs.values()].filter(r => !r.deleted); }
   function activeUnits() { return [...state.units.values()].filter(r => !r.deleted); }
+  function activeDraws() { return [...state.draws.values()].filter(r => !r.deleted); }
+  function photosFor(ref) {
+    return [...state.photos.values()].filter(r => !r.deleted && r.ref === ref).sort((a, b) => a.ts - b.ts);
+  }
 
   const STALE_MS = 10 * 60 * 1000;
   function isStale(rec) { return now() - rec.ts > STALE_MS; }
@@ -256,8 +313,9 @@ const SSBMSStore = (() => {
     toLocal, fromLocal, recordLatLng, recordUTM,
     restore, persist, wipe, loadSelfName, saveSelfName, displayName,
     apply, publish, remove, setSender, setOnline, flush,
-    makePosition, makePOI, makeLoc, makeUnitPlacement,
-    activePOIs, activeLocs, activeUnits,
+    makePosition, makePOI, makeLoc, makeUnitPlacement, makeDraw, makePhoto,
+    drawLatLngs,
+    activePOIs, activeLocs, activeUnits, activeDraws, photosFor,
     isStale, ageText, zulu, STALE_MS
   };
 })();

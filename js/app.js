@@ -17,6 +17,20 @@
   let watchId = null;
   let quick = { type: 'personell', affil: 'ukjent' };
   let losLayer = null;
+  let draftLayer = null;
+
+  /* GPS-bryter. Var tidligere implisitt: en manuell posisjon ble satt, og
+     neste watchPosition-oppdatering overskrev den uten et ord. Er du under
+     tett skog eller i en kjeller er den manuelle posisjonen den RIKTIGE, og
+     da skal maskinen ikke overprove deg. Manuell posisjon slar derfor GPS av
+     til du slar den pa igjen. */
+  let gpsOn = true;
+
+  /* Tegnevalg. Farge huskes mellom okter - man holder seg som regel til en. */
+  let drawPick = {
+    color: localStorage.getItem('ssbms:drawcolor') || 'sort',
+    style: 'line'
+  };
 
   /* Én tilstand avgjør hva neste kartklikk gjør. Tidligere hadde lokasjons-
      plassering sin egen map.once-lytter samtidig som manuell posisjon lyttet
@@ -242,10 +256,12 @@
     map = SSBMSMap.init('map', key.zone, [centre.lat, centre.lng]);
 
     layers.locs = L.layerGroup().addTo(map);
+    layers.draws = L.layerGroup().addTo(map);
     layers.sectors = L.layerGroup().addTo(map);
     layers.pois = L.layerGroup().addTo(map);
     layers.units = L.layerGroup().addTo(map);
     losLayer = L.layerGroup().addTo(map);
+    draftLayer = L.layerGroup().addTo(map);
 
     wireMap();
     wireToolbar();
@@ -351,13 +367,24 @@
           return;
         }
 
+        case 'draw': {
+          pending.pts.push({ e: E, n: N });
+          renderDraft();
+          renderModebar();
+          return;
+        }
+
         case 'selfpos': {
           selfPos = { e: E, n: N, acc: null };
           const sticky = pending.sticky;
+          // Manuell posisjon vinner over GPS til brukeren sier noe annet.
+          const hadGps = gpsOn;
+          if (hadGps) setGps(false, { quiet: true });
           pushPosition();
           const sec = sectorValue();
           SSBMSUI.toast('Egen posisjon satt: ' + G.toShortGrid(E, N) +
-            (sec ? ` · sektor ${G.compass(sec.brg)} ${String(Math.round(sec.brg)).padStart(3, '0')}°` : ''));
+            (sec ? ` · sektor ${G.compass(sec.brg)} ${String(Math.round(sec.brg)).padStart(3, '0')}°` : '') +
+            (hadGps ? ' · GPS av' : ''));
           if (!sticky) setPending(null);
           return;
         }
@@ -375,19 +402,32 @@
      nøyaktig det som gjorde den forrige feilen vanskelig å oppdage. */
   function setPending(p) {
     pending = p;
+    if (draftLayer && (!p || p.kind !== 'draw')) draftLayer.clearLayers();
+    renderModebar();
+    document.body.classList.toggle('armed', !!p);
+    updateQuickBar();
+  }
+
+  function renderModebar() {
     const bar = $('#modebar');
     if (!bar) return;
+    const p = pending;
     if (!p) {
       bar.classList.remove('on');
       bar.innerHTML = '';
-    } else {
-      bar.classList.add('on');
-      bar.innerHTML = `<span class="mb-dot"></span><span class="mb-text">${pendingLabel(p)}</span>
-        <button class="mb-x" type="button">Avbryt</button>`;
-      bar.querySelector('.mb-x').onclick = () => setPending(null);
+      return;
     }
-    document.body.classList.toggle('armed', !!p);
-    updateQuickBar();
+    bar.classList.add('on');
+    const done = p.kind === 'draw' && p.pts.length >= 2;
+    bar.innerHTML = `<span class="mb-dot"></span><span class="mb-text">${pendingLabel(p)}</span>
+      ${done ? '<button class="mb-ok" type="button">Ferdig</button>' : ''}
+      ${p.kind === 'draw' && p.pts.length ? '<button class="mb-undo" type="button">Angre</button>' : ''}
+      <button class="mb-x" type="button">Avbryt</button>`;
+    bar.querySelector('.mb-x').onclick = () => setPending(null);
+    const ok = bar.querySelector('.mb-ok');
+    if (ok) ok.onclick = finishDraw;
+    const un = bar.querySelector('.mb-undo');
+    if (un) un.onclick = () => { p.pts.pop(); renderDraft(); renderModebar(); };
   }
 
   function pendingLabel(p) {
@@ -397,6 +437,11 @@
       case 'unit': return `Trykk i kartet: plasser ${p.cs}`;
       case 'selfpos': return 'Manuell posisjon — trykk i kartet';
       case 'los': return 'Siktlinje — trykk observasjonspunkt, så målpunkt';
+      case 'draw': return `${p.style === 'arrow' ? 'Pil' : 'Strek'} (${S.DRAW[p.color].label.toLowerCase()}) — ${
+        p.pts.length < 2 ? 'trykk i kartet' : p.pts.length + ' punkter'}`;
+      case 'link': return p.a
+        ? 'Koble — trykk observasjon nummer to'
+        : 'Koble — trykk første observasjon';
       default: return 'Armert';
     }
   }
@@ -405,7 +450,13 @@
     if (ev.key === 'Escape' && pending) { setPending(null); SSBMSUI.closeRadial(); }
   });
 
+  /* Modus som eier hvert enkelt kartklikk - tegning, kobling, siktlinje -
+     må ikke få hurtigmenyen over seg. Et langtrykk midt i en strek skal legge
+     et punkt, ikke plassere en observasjon. */
+  const RADIAL_BLOCKED = ['draw', 'link', 'los'];
+
   function openRadialAt(x, y, latlng, mode) {
+    if (pending && RADIAL_BLOCKED.includes(pending.kind)) return;
     if (navigator.vibrate) navigator.vibrate(12);
     SSBMSUI.openRadial(x, y, { ...quick, mode }, ({ type, affil }) => {
       quick.type = type; quick.affil = affil;
@@ -437,6 +488,7 @@
     renderUnits();
     renderPOIs();
     renderLocs();
+    renderDraws();
     renderSectors();
     renderList();
   }
@@ -495,7 +547,10 @@
         icon: icon(S.poiSVG(rec.type, rec.affil), [34, 34]),
         title: `${S.POI[rec.type].label} · ${S.AFFIL[rec.affil].label}`
       });
-      m.on('click', () => openPOISheet(rec));
+      m.on('click', () => {
+        if (isArmed('link')) return handleLinkClick(rec);
+        openPOISheet(rec);
+      });
       g.addLayer(m);
 
       if (rec.mov && rec.mov.brg != null) {
@@ -532,6 +587,168 @@
       });
       m.on('click', () => openLocSheet(rec));
       return m;
+    });
+  }
+
+
+  /* =========================================================
+   *  Tegning: streker, piler og koblinger
+   * ========================================================= */
+
+  /** Slår opp posten en kobling peker på - observasjon, enhet eller lokasjon. */
+  function findRec(id) {
+    return St.state.pois.get(id) || St.state.units.get(id) || St.state.locs.get(id) || null;
+  }
+
+  /**
+   * Punktene en tegning skal følge, i UTM.
+   * En koblet strek leser posisjonen til de to postene nå, ikke da den ble
+   * tegnet: flytter observasjonen seg, følger streken med. Er en av endene
+   * slettet, returneres null og streken tegnes ikke - en kobling til noe som
+   * ikke finnes er verre enn ingen kobling.
+   */
+  function drawUTM(rec) {
+    if (rec.link) {
+      const a = findRec(rec.link.a), b = findRec(rec.link.b);
+      if (!a || !b || a.deleted || b.deleted) return null;
+      return [St.recordUTM(a), St.recordUTM(b)];
+    }
+    return (rec.pts || []).map(([de, dn]) => St.fromLocal(de, dn));
+  }
+
+  function utmToLatLngs(pts) {
+    const z = SSBMSMap.getZone();
+    return pts.map(pt => { const l = G.toLatLng(pt.e, pt.n, z); return [l.lat, l.lng]; });
+  }
+
+  /** Legger en strek i et lag, med kontrastkant under og valgfritt pilhode. */
+  function paintLine(layer, pts, { color, style, dashed, opacity = 1, onClick }) {
+    const latlngs = utmToLatLngs(pts);
+    const c = S.drawColor(color), halo = S.drawHalo(color);
+    L.polyline(latlngs, {
+      color: halo, weight: 7, opacity: 0.5 * opacity, interactive: false,
+      lineCap: 'round', lineJoin: 'round'
+    }).addTo(layer);
+    const line = L.polyline(latlngs, {
+      color: c, weight: 3.2, opacity: 0.95 * opacity,
+      lineCap: 'round', lineJoin: 'round',
+      dashArray: dashed ? '8 6' : null,
+      interactive: !!onClick
+    });
+    if (onClick) line.on('click', ev => { L.DomEvent.stop(ev); onClick(); });
+    line.addTo(layer);
+
+    if (style === 'arrow' && pts.length >= 2) {
+      const last = pts[pts.length - 1], prev = pts[pts.length - 2];
+      const brg = G.bearing(prev.e, prev.n, last.e, last.n);
+      const ll = latlngs[latlngs.length - 1];
+      L.marker(ll, {
+        icon: L.divIcon({
+          html: `<div class="draw-arrow" style="transform:rotate(${brg}deg)">${S.arrowHeadSVG(color, 24)}</div>`,
+          className: 'sym', iconSize: [24, 24], iconAnchor: [12, 12]
+        }),
+        interactive: false, zIndexOffset: 300
+      }).addTo(layer);
+    }
+  }
+
+  function renderDraws() {
+    if (!layers.draws) return;
+    layers.draws.clearLayers();
+    St.activeDraws().forEach(rec => {
+      const pts = drawUTM(rec);
+      if (!pts || pts.length < 2) return;
+      paintLine(layers.draws, pts, {
+        color: rec.color, style: rec.style,
+        dashed: !!rec.link,
+        onClick: () => openDrawSheet(rec)
+      });
+    });
+  }
+
+  /** Streken slik den ser ut mens den tegnes, med markør på hvert satt punkt. */
+  function renderDraft() {
+    if (!draftLayer) return;
+    draftLayer.clearLayers();
+    if (!isArmed('draw')) return;
+    const pts = pending.pts;
+    if (pts.length >= 2) {
+      paintLine(draftLayer, pts, { color: pending.color, style: pending.style, opacity: 0.7 });
+    }
+    utmToLatLngs(pts).forEach(ll => {
+      L.circleMarker(ll, {
+        radius: 5, color: S.drawColor(pending.color), weight: 2,
+        fillColor: S.drawColor(pending.color), fillOpacity: 0.8, interactive: false
+      }).addTo(draftLayer);
+    });
+  }
+
+  function finishDraw() {
+    if (!isArmed('draw') || pending.pts.length < 2) return;
+    const rec = St.makeDraw({ pts: pending.pts, style: pending.style, color: pending.color });
+    const style = pending.style, n = pending.pts.length;
+    setPending(null);
+    St.publish(rec);
+    SSBMSUI.toast(`${style === 'arrow' ? 'Pil' : 'Strek'} med ${n} punkter delt.`);
+  }
+
+  function handleLinkClick(rec) {
+    if (!pending.a) {
+      pending.a = rec.id;
+      renderModebar();
+      SSBMSUI.toast('Første observasjon valgt. Trykk den andre.');
+      return;
+    }
+    if (pending.a === rec.id) return SSBMSUI.toast('Velg en annen observasjon.', 'warn');
+    const link = { a: pending.a, b: rec.id };
+    const color = pending.color, style = pending.style;
+    setPending(null);
+    St.publish(St.makeDraw({ pts: [], style, color, link }));
+    SSBMSUI.toast('Observasjonene er koblet.');
+  }
+
+  function openDrawSheet(rec) {
+    const linked = !!rec.link;
+    const body = el('div', 'drawsheet', `
+      <div class="kv"><span>Type</span><b>${rec.style === 'arrow' ? 'Pil' : 'Strek'}${linked ? ' (kobling)' : ''}</b></div>
+      <div class="kv"><span>Tegnet av</span><b>${escapeHtml(rec.by || '—')}</b></div>
+      <div class="kv"><span>Tid</span><b>${St.zulu(rec.ts)} (${St.ageText(rec.ts)} siden)</b></div>
+      ${linked ? '<p class="muted small">Koblingen følger de to observasjonene. Flyttes en av dem, flytter streken seg med. Slettes en av dem, forsvinner streken.</p>' : ''}
+      <label>Farge</label>
+      <div class="colpick" id="dCol"></div>
+      <label>Form
+        <select id="dStyle">
+          <option value="line"${rec.style === 'line' ? ' selected' : ''}>Strek</option>
+          <option value="arrow"${rec.style === 'arrow' ? ' selected' : ''}>Pil</option>
+        </select></label>
+      <label>Merknad <input id="dDesc" value="${escapeHtml(rec.desc || '')}" placeholder="valgfritt"></label>`);
+
+    let col = rec.color;
+    const cp = body.querySelector('#dCol');
+    S.DRAW_ORDER.forEach(k => {
+      const b = el('button', 'colbtn' + (k === col ? ' on' : ''), `<i style="background:${S.DRAW[k].color}"></i><span>${S.DRAW[k].label}</span>`);
+      b.onclick = () => {
+        col = k;
+        cp.querySelectorAll('.colbtn').forEach(x => x.classList.remove('on'));
+        b.classList.add('on');
+      };
+      cp.appendChild(b);
+    });
+
+    SSBMSUI.sheet({
+      title: linked ? 'Kobling' : (rec.style === 'arrow' ? 'Pil' : 'Strek'), body,
+      actions: [
+        { label: 'Lagre', kind: 'primary', onClick: close => {
+            St.publish({
+              ...rec, color: col,
+              style: body.querySelector('#dStyle').value,
+              desc: body.querySelector('#dDesc').value,
+              ts: Date.now()
+            });
+            close();
+          } },
+        { label: 'Slett', kind: 'danger', onClick: close => { St.remove(rec); close(); } }
+      ]
     });
   }
 
@@ -592,9 +809,15 @@
       ${rec.manual ? `<p class="caveat">Håndplassert posisjon. Melder ${escapeHtml(rec.cs)} inn egen
         posisjon, overtar den automatisk.</p>` : ''}`);
 
+    body.appendChild(photoBlock(rec.id, rec.id === St.state.self
+      ? 'Bilder fra din sektor' : 'Bilder knyttet til ' + rec.cs));
+
     const actions = [{ label: 'Kopier melding', onClick: () => copy(reportText(rec)) }];
     if (rec.id === St.state.self) {
       actions.unshift({ label: 'Navn', onClick: close => { close(); openSelfNameSheet(); } });
+      // Snarvei: sektoren justeres oftest rett etter at man har sett på egen
+      // enhet, og veien om FAB-en var ett trykk for mye i mørket.
+      actions.unshift({ label: 'Sektor og retning', kind: 'primary', onClick: close => { close(); openSectorSheet(); } });
     }
     if (rec.manual) {
       actions.unshift({ label: 'Flytt / sektor', onClick: close => { close(); openManualUnitEditor(rec); } });
@@ -729,6 +952,8 @@
         <label>Fart <input id="pMovS" type="text" value="${rec.mov && rec.mov.speed ? escapeHtml(rec.mov.speed) : ''}" placeholder="f.eks. til fots"></label>
       </div>`);
 
+    body.appendChild(photoBlock(rec.id, 'Bilder'));
+
     SSBMSUI.sheet({
       title: S.POI[rec.type].label, body,
       actions: [
@@ -812,7 +1037,7 @@
       map.setView([ll.lat, ll.lng], Math.max(map.getZoom(), 14));
     };
     $('#btnLos').onclick = startLos;
-    $('#btnLoc').onclick = openLocPicker;
+    $('#btnLoc').onclick = openMissionSheet;
     $('#btnUnit').onclick = () => openUnitPlacer();
     $('#btnMenu').onclick = openMenu;
     $('#btnList').onclick = () => $('#side').classList.toggle('open');
@@ -892,6 +1117,8 @@
       <label>Merknad <input id="sNote" type="text" placeholder="valgfritt"></label>
       <div class="report" id="sPrev"></div>`);
 
+    body.appendChild(photoBlock(St.state.self, 'Bilder fra sektoren'));
+
     const sh = SSBMSUI.sheet({
       title: 'Sektor og retning', body,
       actions: [
@@ -944,19 +1171,82 @@
     return { brg: Math.round(selfObs.brg), width: selfObs.width, range: selfObs.range };
   }
 
-  /* ---------- lokasjoner ---------- */
+  /* ---------- oppdrag: lokasjoner og tegning ---------- */
 
-  function openLocPicker() {
-    const body = el('div', 'locpick', '');
+  /**
+   * Ett ark for alt som beskriver oppdraget på kartet, i stedet for en FAB per
+   * ting. Lokasjonene ligger øverst fordi de brukes oftest; tegningen under,
+   * fordi den krever et valg av farge og form før den gir mening.
+   */
+  function openMissionSheet() {
+    const body = el('div', 'mission', '');
+
+    body.appendChild(el('h3', '', 'Lokasjoner'));
+    const lp = el('div', 'locpick', '');
     S.LOC_ORDER.forEach(k => {
       const b = el('button', 'locbtn', `${S.locSVG(k, 36)}<span>${S.LOC[k].label}</span>`);
-      b.onclick = () => {
-        sh.close();
-        setPending({ kind: 'loc', locKind: k });
-      };
-      body.appendChild(b);
+      b.onclick = () => { sh.close(); setPending({ kind: 'loc', locKind: k }); };
+      lp.appendChild(b);
     });
-    const sh = SSBMSUI.sheet({ title: 'Lokasjon', body });
+    body.appendChild(lp);
+
+    body.appendChild(el('h3', '', 'Tegning'));
+    const cp = el('div', 'colpick', '');
+    S.DRAW_ORDER.forEach(k => {
+      const b = el('button', 'colbtn' + (k === drawPick.color ? ' on' : ''),
+        `<i style="background:${S.DRAW[k].color}"></i><span>${S.DRAW[k].label}</span>`);
+      b.onclick = () => {
+        drawPick.color = k;
+        localStorage.setItem('ssbms:drawcolor', k);
+        cp.querySelectorAll('.colbtn').forEach(x => x.classList.remove('on'));
+        b.classList.add('on');
+      };
+      cp.appendChild(b);
+    });
+    body.appendChild(cp);
+
+    const dp = el('div', 'locpick', '');
+    const drawBtn = (label, svg, onClick) => {
+      const b = el('button', 'locbtn', `${svg}<span>${label}</span>`);
+      b.onclick = onClick;
+      dp.appendChild(b);
+    };
+    const lineIcon = `<svg viewBox="0 0 48 48" width="36" height="36"><path d="M8 38 L40 10" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>`;
+    const arrowIcon = `<svg viewBox="0 0 48 48" width="36" height="36"><path d="M8 38 L38 12" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M26 10 L40 8 L38 22" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    const linkIcon = `<svg viewBox="0 0 48 48" width="36" height="36"><circle cx="13" cy="35" r="6" fill="none" stroke="currentColor" stroke-width="3.4"/><circle cx="35" cy="13" r="6" fill="none" stroke="currentColor" stroke-width="3.4"/><path d="M17.5 30.5 L30.5 17.5" fill="none" stroke="currentColor" stroke-width="3.4" stroke-dasharray="5 4" stroke-linecap="round"/></svg>`;
+
+    drawBtn('Strek', lineIcon, () => {
+      sh.close();
+      setPending({ kind: 'draw', style: 'line', color: drawPick.color, pts: [] });
+      SSBMSUI.toast('Trykk i kartet for hvert punkt. «Ferdig» når streken er klar.');
+    });
+    drawBtn('Pil', arrowIcon, () => {
+      sh.close();
+      setPending({ kind: 'draw', style: 'arrow', color: drawPick.color, pts: [] });
+      SSBMSUI.toast('Trykk start, så videre punkter. Pilhodet havner på det siste.');
+    });
+    drawBtn('Koble observasjoner', linkIcon, () => {
+      if (St.activePOIs().length < 2) return SSBMSUI.toast('Det må finnes minst to observasjoner å koble.', 'warn');
+      sh.close();
+      setPending({ kind: 'link', style: 'arrow', color: drawPick.color, a: null });
+      SSBMSUI.toast('Trykk den første observasjonen.');
+    });
+    body.appendChild(dp);
+
+    const n = St.activeDraws().length;
+    body.appendChild(el('p', 'muted small',
+      n ? `${n} tegning${n === 1 ? '' : 'er'} på kartet. Trykk på en strek for å endre farge eller slette den.`
+        : 'Trykk på en ferdig strek i kartet for å endre farge eller slette den.'));
+
+    const actions = [];
+    if (n) actions.push({ label: 'Slett alle tegninger', kind: 'danger', onClick: close => {
+      if (!confirm(`Slette alle ${n} tegninger? Dette gjelder for hele troppen.`)) return;
+      St.activeDraws().forEach(r => St.remove(r));
+      close();
+      SSBMSUI.toast('Tegningene er slettet.');
+    } });
+
+    const sh = SSBMSUI.sheet({ title: 'Oppdrag', body, actions });
   }
 
   /* ---------- plassering av enheter i troppen ---------- */
@@ -1202,23 +1492,59 @@
 
   function startGeolocation() {
     if (!navigator.geolocation) {
+      gpsOn = false;
       setPending({ kind: 'selfpos', sticky: true });
-      return SSBMSUI.toast('Ingen GPS tilgjengelig - trykk i kartet for å sette posisjon.', 'warn');
+      SSBMSUI.toast('Ingen GPS tilgjengelig - trykk i kartet for å sette posisjon.', 'warn');
+    } else {
+      startWatch();
     }
+    setInterval(() => { if (selfPos && !St.state.emcon) pushPosition(); }, CFG.defaults.positionIntervalMs);
+  }
+
+  function startWatch() {
+    if (watchId != null || !navigator.geolocation) return;
     watchId = navigator.geolocation.watchPosition(
       p => {
+        // Andre beltet: en oppdatering som allerede var i kø da GPS ble slått
+        // av, skal heller ikke få lov til å flytte en manuell posisjon.
+        if (!gpsOn) return;
         const { e, n } = G.toUTM(p.coords.latitude, p.coords.longitude, SSBMSMap.getZone());
         selfPos = { e, n, acc: p.coords.accuracy };
         renderStatus();
       },
       err => {
         console.warn('GPS', err.message);
+        if (!gpsOn) return;
         SSBMSUI.toast('GPS: ' + err.message + ' - trykk i kartet for å sette posisjon.', 'warn');
         if (!pending) setPending({ kind: 'selfpos', sticky: true });
       },
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
     );
-    setInterval(() => { if (selfPos && !St.state.emcon) pushPosition(); }, CFG.defaults.positionIntervalMs);
+  }
+
+  function stopWatch() {
+    if (watchId == null) return;
+    try { navigator.geolocation.clearWatch(watchId); } catch (e) { /* ignorer */ }
+    watchId = null;
+  }
+
+  /**
+   * Av/på for GPS. Å bare ignorere oppdateringene hadde holdt funksjonelt,
+   * men watchPosition med enableHighAccuracy holder radioen i gang - og en
+   * manuell posisjon settes gjerne nettopp når man vil spare batteri eller
+   * ikke stoler på mottaket. Så vi stopper lytteren.
+   */
+  function setGps(on, { quiet = false } = {}) {
+    if (gpsOn === on) { renderStatus(); return; }
+    gpsOn = on;
+    if (on) {
+      startWatch();
+      if (!quiet) SSBMSUI.toast('GPS på igjen. Posisjonen oppdateres automatisk.');
+    } else {
+      stopWatch();
+      if (!quiet) SSBMSUI.toast('GPS av. Posisjonen står til du flytter den selv.', 'warn');
+    }
+    renderStatus();
   }
 
   /** @returns {boolean} om posisjonen faktisk ble sendt. */
@@ -1284,7 +1610,9 @@
     if (selfPos) {
       const ll = G.toLatLng(selfPos.e, selfPos.n, z);
       $('#ownGrid').textContent = G.toMGRS(selfPos.e, selfPos.n, z, ll.lat, 5);
-      $('#ownAcc').textContent = selfPos.acc != null ? '±' + Math.round(selfPos.acc) + ' m' : 'manuell';
+      $('#ownAcc').textContent = selfPos.acc != null
+        ? '±' + Math.round(selfPos.acc) + ' m'
+        : (gpsOn ? 'manuell' : 'manuell · låst');
     } else {
       $('#ownGrid').textContent = 'venter på posisjon…';
       $('#ownAcc').textContent = '';
@@ -1295,6 +1623,12 @@
     conn.textContent = St.state.emcon ? 'LYTTER' : (St.state.online ? 'PÅ NETT' : 'AV NETT');
     conn.className = 'tag ' + (St.state.emcon ? 'emcon' : (St.state.online ? 'ok' : 'bad'));
     $('#queueTag').textContent = St.state.outbox.length ? St.state.outbox.length + ' i kø' : '';
+    const gt = $('#gpsTag');
+    if (gt) {
+      gt.textContent = gpsOn ? '' : 'GPS AV';
+      gt.className = 'tag' + (gpsOn ? '' : ' emcon');
+      gt.title = gpsOn ? '' : 'Manuell posisjon er låst. Slå på GPS igjen i menyen.';
+    }
     const swTag = $('#swTag');
     if (swTag) {
       swTag.textContent = swReason ? 'INGEN OFFLINE' : '';
@@ -1352,7 +1686,10 @@
       <button class="mi ${St.state.backend === 'supabase' ? '' : 'warnrow'}" id="mSharing">📡 Deling: ${
         St.state.backend === 'supabase' ? 'Supabase' : 'KUN LOKALT — ingen deling'}</button>
       <button class="mi" id="mEmcon">${St.state.emcon ? '🔇 Lyttemodus PÅ - trykk for å sende igjen' : '📡 Slå på lyttemodus (ingen utsending)'}</button>
-      <button class="mi" id="mManual">${isArmed('selfpos') ? '📍 Manuell posisjon PÅ - trykk for å gå tilbake til GPS' : '📍 Sett egen posisjon manuelt'}</button>
+      <button class="mi" id="mManual">${isArmed('selfpos') ? '📍 Manuell posisjon PÅ - trykk for å avbryte' : '📍 Sett egen posisjon manuelt'}</button>
+      <button class="mi ${gpsOn ? '' : 'warnrow'}" id="mGps">${gpsOn
+        ? '🛰 GPS på — posisjonen følger mottakeren'
+        : '🛰 GPS AV — trykk for å slå på igjen'}</button>
       <button class="mi" id="mUnit">👥 Plasser enhet fra troppen</button>
       <button class="mi" id="mSelfName">🏷 Navn på egen enhet (${St.state.selfName || 'ikke satt'})</button>
       <button class="mi" id="mLabels">${labelsOn ? '🙈 Skjul alle enhetsnavn (kun her)' : '👁 Vis alle enhetsnavn'}</button>
@@ -1360,7 +1697,8 @@
       <button class="mi" id="mUpdate">🔄 Tving oppdatering av appen</button>
       <button class="mi" id="mExport">💾 Eksporter GeoJSON</button>
       <button class="mi" id="mKey">🔑 Vis sesjonsinfo</button>
-      <button class="mi danger" id="mWipe">🗑 Slett alt og logg ut</button>`);
+      <button class="mi danger" id="mWipe">🗑 Slett alt og logg ut</button>
+      <p class="menufoot">SSBMS v${CFG.version} · ${CFG.released}</p>`);
     const sh = SSBMSUI.sheet({ title: 'Meny', body });
 
     body.querySelector('#mSharing').onclick = () => { sh.close(); openSharingSheet(); };
@@ -1374,7 +1712,16 @@
       const on = isArmed('selfpos');
       sh.close();
       setPending(on ? null : { kind: 'selfpos', sticky: true });
-      if (on) SSBMSUI.toast('Tilbake til GPS.');
+      if (!on) SSBMSUI.toast('Trykk der du står. GPS slås av til du slår den på igjen.');
+    };
+    body.querySelector('#mGps').onclick = () => {
+      sh.close();
+      if (gpsOn) {
+        setGps(false);
+      } else {
+        setGps(true);
+        if (!navigator.geolocation) SSBMSUI.toast('Nettleseren gir ingen GPS her.', 'warn');
+      }
     };
     body.querySelector('#mUnit').onclick = () => { sh.close(); openUnitPlacer(); };
     body.querySelector('#mSelfName').onclick = () => { sh.close(); openSelfNameSheet(); };
@@ -1410,8 +1757,10 @@
   function showSessionInfo() {
     const k = St.state.key;
     const body = el('div', '', `
+      <div class="kv"><span>Appversjon</span><b class="mono">v${CFG.version} <span class="muted">(${CFG.released})</span></b></div>
       <div class="kv"><span>Kallesignal</span><b>${St.state.self}</b></div>
       <div class="kv"><span>Rom-ID</span><b class="mono small">${St.state.roomId}</b></div>
+      <div class="kv"><span>Posisjonskilde</span><b class="${gpsOn ? 'good' : 'warn'}">${gpsOn ? 'GPS' : 'Manuell (GPS av)'}</b></div>
       <div class="kv"><span>UTM-sone</span><b>${k.zone} (EPSG:258${k.zone})</b></div>
       <div class="kv"><span>AO-origo</span><b>${(k.originE / 1000).toFixed(0)} km Ø / ${(k.originN / 1000).toFixed(0)} km N</b></div>
       <div class="kv"><span>Bakende</span><b>${St.state.backend}</b></div>
@@ -1492,6 +1841,20 @@
     }));
     St.activeLocs().forEach(r => push(r, { kategori: 'lokasjon', type: r.kind, beskrivelse: r.desc }));
 
+    St.activeDraws().forEach(r => {
+      const pts = drawUTM(r);
+      if (!pts || pts.length < 2) return;
+      feat.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: utmToLatLngs(pts).map(([lat, lng]) => [lng, lat]) },
+        properties: {
+          kategori: 'tegning', form: r.style, farge: r.color,
+          kobling: r.link || null, beskrivelse: r.desc || null,
+          tegnet_av: r.by || null, tid: new Date(r.ts).toISOString()
+        }
+      });
+    });
+
     const blob = new Blob([JSON.stringify({ type: 'FeatureCollection', features: feat }, null, 2)],
       { type: 'application/geo+json' });
     const a = document.createElement('a');
@@ -1499,6 +1862,126 @@
     a.download = `ssbms-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '')}Z.geojson`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+
+
+  /* =========================================================
+   *  Bilder
+   *
+   *  Miniatyrer, ikke dokumentasjonsfoto. De går gjennom nøyaktig samme
+   *  krypterte kanal som resten, og ssbms_put tar maks 20 000 tegn
+   *  chiffertekst. Base64 inn i JSON, AES rundt, base64 ut igjen gir ca. 1,8x
+   *  oppblåsing, så budsjettet er rundt 10 kB bilde. Vi komprimerer ned til
+   *  det passer i stedet for å avvise brukeren med en filstørrelse.
+   * ========================================================= */
+
+  async function loadBitmap(file) {
+    if (window.createImageBitmap) {
+      // imageOrientation: telefonbilder ligger som regel med EXIF-rotasjon.
+      try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+      catch (e) { try { return await createImageBitmap(file); } catch (e2) { /* faller gjennom */ } }
+    }
+    return await new Promise((res, rej) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); res(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('kan ikke leses')); };
+      img.src = url;
+    });
+  }
+
+  async function compressPhoto(file) {
+    const src = await loadBitmap(file);
+    const sw = src.width || src.naturalWidth;
+    const sh = src.height || src.naturalHeight;
+    if (!sw || !sh) throw new Error('tomt bilde');
+    const cv = document.createElement('canvas');
+    const ctx = cv.getContext('2d');
+    for (const w of CFG.photos.widths) {
+      const scale = Math.min(1, w / Math.max(sw, sh));
+      cv.width = Math.max(1, Math.round(sw * scale));
+      cv.height = Math.max(1, Math.round(sh * scale));
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      ctx.drawImage(src, 0, 0, cv.width, cv.height);
+      for (const q of CFG.photos.qualities) {
+        const url = cv.toDataURL('image/jpeg', q);
+        const b64 = url.slice(url.indexOf(',') + 1);
+        const bytes = Math.round(b64.length * 0.75);
+        if (bytes <= CFG.photos.maxBytes) return { b64, bytes, w: cv.width, h: cv.height };
+      }
+    }
+    return null;
+  }
+
+  function attachPhoto(ref, done) {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = 'image/*';
+    inp.capture = 'environment';
+    inp.style.display = 'none';
+    document.body.appendChild(inp);
+    inp.onchange = async () => {
+      const file = inp.files && inp.files[0];
+      inp.remove();
+      if (!file) return;
+      SSBMSUI.toast('Komprimerer bilde…');
+      try {
+        const r = await compressPhoto(file);
+        if (!r) return SSBMSUI.toast('Bildet lar seg ikke komprimere nok til å sendes. Prøv et motiv med mindre detaljer.', 'warn');
+        St.publish(St.makePhoto({ ref, img: r.b64 }));
+        SSBMSUI.toast(`Bilde lagt ved — ${r.w}×${r.h}, ${Math.max(1, Math.round(r.bytes / 1024))} kB.`);
+        if (done) done();
+      } catch (e) {
+        console.warn('[ssbms] bilde:', e);
+        SSBMSUI.toast('Kunne ikke lese bildet.', 'warn');
+      }
+    };
+    inp.click();
+  }
+
+  /** Miniatyrstripe med knapp, til bruk nederst i et ark. */
+  function photoBlock(ref, title) {
+    const box = el('div', 'photobox', '');
+    const redraw = () => {
+      box.innerHTML = '';
+      box.appendChild(el('h3', '', escapeHtml(title || 'Bilder')));
+      const ps = St.photosFor(ref);
+      const strip = el('div', 'photos', '');
+      ps.forEach(rec => {
+        const b = el('button', 'photo', `<img alt="" src="data:image/jpeg;base64,${rec.img}">`);
+        b.onclick = () => openPhotoViewer(rec, redraw);
+        strip.appendChild(b);
+      });
+      const add = el('button', 'photo add', '<span>📷</span>');
+      add.title = 'Legg ved bilde';
+      add.onclick = () => attachPhoto(ref, redraw);
+      strip.appendChild(add);
+      box.appendChild(strip);
+      if (!ps.length) {
+        box.appendChild(el('p', 'muted small',
+          'Miniatyr på ca. 10 kB, kryptert som alt annet. Nok til å vise hva du ser — ikke til å lese skilt.'));
+      }
+    };
+    redraw();
+    return box;
+  }
+
+  function openPhotoViewer(rec, done) {
+    const body = el('div', 'photoview', `
+      <img alt="" src="data:image/jpeg;base64,${rec.img}">
+      <div class="kv"><span>Tatt av</span><b>${escapeHtml(rec.by || '—')}</b></div>
+      <div class="kv"><span>Tid</span><b>${St.zulu(rec.ts)} (${St.ageText(rec.ts)} siden)</b></div>
+      <label>Merknad <input id="phDesc" value="${escapeHtml(rec.desc || '')}" placeholder="valgfritt"></label>`);
+    SSBMSUI.sheet({
+      title: 'Bilde', body,
+      actions: [
+        { label: 'Lagre', kind: 'primary', onClick: close => {
+            St.publish({ ...rec, desc: body.querySelector('#phDesc').value, ts: Date.now() });
+            close(); if (done) done();
+          } },
+        { label: 'Slett', kind: 'danger', onClick: close => { St.remove(rec); close(); if (done) done(); } }
+      ]
+    });
   }
 
   /* =========================================================

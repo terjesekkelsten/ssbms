@@ -27,7 +27,7 @@ const SSBMSSymbols = (() => {
     kjoretoy: { label: 'Kjøretøy', short: 'KJT' },
     drone: { label: 'Drone', short: 'UAS' },
     ied: { label: 'IED', short: 'IED' },
-    bygning: { label: 'Bygning', short: 'BYG' }
+    bygning: { label: 'Bygning', short: 'BYGG' }
   };
   const POI_ORDER = ['personell', 'kjoretoy', 'drone', 'ied', 'bygning'];
 
@@ -38,6 +38,30 @@ const SSBMSSymbols = (() => {
     maal: { label: 'Mål', color: '#e040fb' }
   };
   const LOC_ORDER = ['infil', 'exfil', 'sanplass', 'maal'];
+
+  /* ---------- tegning ---------- */
+
+  /* Fire farger, bevisst få. Sort og hvit er de eneste som er lesbare på
+     henholdsvis lyst og mørkt kart, så begge må finnes; rød og grønn bærer
+     fiendtlig/eget slik resten av symbolikken gjør. Hver strek tegnes med en
+     kontrastkant under seg, ellers forsvinner sort på skygge og hvit på snø. */
+  const DRAW = {
+    sort:  { label: 'Sort',  color: '#101418', halo: 'rgba(255,255,255,.85)' },
+    rod:   { label: 'Rød',   color: '#ff1744', halo: 'rgba(0,0,0,.75)' },
+    gronn: { label: 'Grønn', color: '#00c853', halo: 'rgba(0,0,0,.75)' },
+    hvit:  { label: 'Hvit',  color: '#ffffff', halo: 'rgba(0,0,0,.8)' }
+  };
+  const DRAW_ORDER = ['sort', 'rod', 'gronn', 'hvit'];
+  const drawColor = c => (DRAW[c] || DRAW.sort).color;
+  const drawHalo  = c => (DRAW[c] || DRAW.sort).halo;
+
+  /** Pilhode som peker rett opp; roteres av kartlaget. */
+  function arrowHeadSVG(colorKey, size = 22) {
+    const c = drawColor(colorKey), h = drawHalo(colorKey);
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${size}" height="${size}">
+      <path d="M12 3 L20 20 L12 16 L4 20 Z" fill="${c}" stroke="${h}" stroke-width="1.6" stroke-linejoin="round"/>
+    </svg>`;
+  }
 
   /* ---------- rammer ---------- */
 
@@ -149,7 +173,8 @@ const SSBMSSymbols = (() => {
   }
 
   return {
-    AFFIL, AFFIL_ORDER, POI, POI_ORDER, LOC, LOC_ORDER,
+    AFFIL, AFFIL_ORDER, POI, POI_ORDER, LOC, LOC_ORDER, DRAW, DRAW_ORDER,
+    drawColor, drawHalo, arrowHeadSVG,
     poiSVG, locSVG, unitSVG, movementArrowSVG, glyph, framePath, dataURI
   };
 })();

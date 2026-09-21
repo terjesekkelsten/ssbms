@@ -6,6 +6,13 @@
 
 window.SSBMS_CONFIG = {
 
+  /* Versjon. Holdes i sync med CHANGELOG.md og git-taggen, og vises i
+     Meny -> Sesjonsinfo. Poenget er at du i felt kan lese av hvilken versjon
+     telefonen faktisk kjorer - en app som har hengt igjen i cachen ser ellers
+     helt lik ut som den nye. */
+  version: '0.3.0',
+  released: '2026-09-21',
+
   /* Supabase. La stå tom for lokal modus (synker kun faner på samme maskin).
    *
    * publishableKey er Supabases nye navn på det som het «anon public». Den er
@@ -35,6 +42,17 @@ window.SSBMS_CONFIG = {
     targetHeight: 1.7,         // m
     positionIntervalMs: 15000, // hvor ofte egen posisjon sendes
     staleMinutes: 10
+  },
+
+  /* Bilder. Miniatyrer gar gjennom den samme krypterte kanalen som alt annet,
+     og ssbms_put tar maks 20 000 tegn chiffertekst. Base64 + AES + base64 gir
+     omtrent 1,8x oppblasing, sa taket i praksis er ca. 10 kB bilde. Det er en
+     miniatyr - ikke dokumentasjonsfoto. Full opplosning krever Supabase
+     Storage, se CHANGELOG / veikart. */
+  photos: {
+    maxBytes: 10000,
+    widths: [480, 384, 320, 256],
+    qualities: [0.6, 0.5, 0.42, 0.34]
   },
 
   /* Offline-nedlasting: hvor mange zoomnivåer over gjeldende som hentes. */
