@@ -38,11 +38,14 @@ Ingenting ennå.
   streken, ikke en egen strektype, så den kombineres fritt med strek, pil og
   kobling. Trykk på en ferdig strek for å endre farge, form og stipling eller
   slette den. Farge og strektype huskes mellom økter.
-- **Kobling mellom observasjoner.** Velg to observasjoner, og streken følger
-  dem. Flytter observasjonen seg, flytter koblingen seg med. Slettes en av
-  endene, forsvinner streken — en kobling til noe som ikke finnes er verre enn
-  ingen kobling. Koblinger følger samme stiplevalg som resten; trykk på
-  streken for å se om den er en kobling.
+- **Kobling mellom punkter.** Koble sammen **observasjoner og lokasjoner** i
+  hvilken som helst kombinasjon — infil → mål → exfil for en rute, eller en
+  observasjon til målet den hører til. Streken følger de to punktene: flytter
+  et av dem seg, flytter koblingen seg med. Slettes eller skjules et av dem,
+  forsvinner streken — en kobling til noe som ikke finnes er verre enn ingen
+  kobling. Modelinja og arket viser hva som er koblet («Infil → Mål»).
+  Koblinger følger samme stiplevalg som resten; trykk på streken for å se om
+  den er en kobling.
 - **Bilder på observasjoner og egen sektor.** Egne knapper for **Ta bilde**
   og **Velg bilde** — på iPhone åpner `capture="environment"` kameraet direkte
   og fjerner fotobiblioteket fra valgene, så begge deler må finnes. Bildet

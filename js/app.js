@@ -463,8 +463,8 @@
         S.DRAW[p.color].label.toLowerCase()}) — ${
         p.pts.length < 2 ? 'trykk i kartet' : p.pts.length + ' punkter'}`;
       case 'link': return p.a
-        ? 'Koble — trykk observasjon nummer to'
-        : 'Koble — trykk første observasjon';
+        ? `Koble fra ${p.aLabel} — trykk det andre punktet`
+        : 'Koble — trykk første observasjon eller lokasjon';
       default: return 'Armert';
     }
   }
@@ -650,7 +650,10 @@
         icon: icon(S.locSVG(rec.kind), [32, 32]),
         title: S.LOC[rec.kind].label
       });
-      m.on('click', () => openLocSheet(rec));
+      m.on('click', () => {
+        if (isArmed('link')) return handleLinkClick(rec);
+        openLocSheet(rec);
+      });
       return m;
     });
   }
@@ -659,6 +662,18 @@
   /* =========================================================
    *  Tegning: streker, piler og koblinger
    * ========================================================= */
+
+  /** Kort, lesbart navn på en post. Brukes i koblingsarket og i meldingene. */
+  function recLabel(rec) {
+    if (!rec) return '—';
+    if (rec.t === 'poi') return `${S.POI[rec.type].label}${rec.count ? ' ×' + rec.count : ''} (${S.AFFIL[rec.affil].label.toLowerCase()})`;
+    if (rec.t === 'loc') return S.LOC[rec.kind].label;
+    if (rec.t === 'pos') return St.displayName(rec) || rec.cs;
+    return '—';
+  }
+
+  /** Alt som kan være ende i en kobling. */
+  function linkTargets() { return [...visiblePOIs(), ...St.activeLocs()]; }
 
   /** Slår opp posten en kobling peker på - observasjon, enhet eller lokasjon. */
   function findRec(id) {
@@ -774,16 +789,18 @@
   function handleLinkClick(rec) {
     if (!pending.a) {
       pending.a = rec.id;
+      pending.aLabel = recLabel(rec);
       renderModebar();
-      SSBMSUI.toast('Første observasjon valgt. Trykk den andre.');
+      SSBMSUI.toast(`${recLabel(rec)} valgt. Trykk det andre punktet.`);
       return;
     }
-    if (pending.a === rec.id) return SSBMSUI.toast('Velg en annen observasjon.', 'warn');
+    if (pending.a === rec.id) return SSBMSUI.toast('Velg et annet punkt.', 'warn');
     const link = { a: pending.a, b: rec.id };
     const color = pending.color, style = pending.style, dash = pending.dash;
+    const fra = pending.aLabel, til = recLabel(rec);
     setPending(null);
     St.publish(St.makeDraw({ pts: [], style, color, dash, link }));
-    SSBMSUI.toast('Observasjonene er koblet.');
+    SSBMSUI.toast(`Koblet: ${fra} → ${til}.`);
   }
 
   function openDrawSheet(rec) {
@@ -793,7 +810,8 @@
       <div class="kv"><span>Type</span><b>${dashNow ? 'Stiplet ' : ''}${rec.style === 'arrow' ? 'pil' : 'strek'}${linked ? ' (kobling)' : ''}</b></div>
       <div class="kv"><span>Tegnet av</span><b>${escapeHtml(rec.by || '—')}</b></div>
       <div class="kv"><span>Tid</span><b>${St.zulu(rec.ts)} (${St.ageText(rec.ts)} siden)</b></div>
-      ${linked ? '<p class="muted small">Koblingen følger de to observasjonene. Flyttes en av dem, flytter streken seg med. Slettes en av dem, forsvinner streken.</p>' : ''}
+      ${linked ? `<div class="kv"><span>Kobler</span><b>${escapeHtml(recLabel(findRec(rec.link.a)))} → ${escapeHtml(recLabel(findRec(rec.link.b)))}</b></div>
+      <p class="muted small">Koblingen følger de to punktene. Flyttes et av dem, flytter streken seg med. Slettes et av dem, forsvinner streken.</p>` : ''}
       <label>Farge</label>
       <div class="colpick" id="dCol"></div>
       <label>Form
@@ -1335,11 +1353,13 @@
       setPending({ kind: 'draw', style: 'arrow', color: drawPick.color, dash: drawPick.dash, pts: [] });
       SSBMSUI.toast('Trykk start, så videre punkter. Pilhodet havner på det siste.');
     });
-    drawBtn('Koble observasjoner', linkIcon, () => {
-      if (St.activePOIs().length < 2) return SSBMSUI.toast('Det må finnes minst to observasjoner å koble.', 'warn');
+    drawBtn('Koble punkter', linkIcon, () => {
+      if (linkTargets().length < 2) {
+        return SSBMSUI.toast('Det må finnes minst to observasjoner eller lokasjoner å koble.', 'warn');
+      }
       sh.close();
       setPending({ kind: 'link', style: 'arrow', color: drawPick.color, dash: drawPick.dash, a: null });
-      SSBMSUI.toast('Trykk den første observasjonen.');
+      SSBMSUI.toast('Trykk den første observasjonen eller lokasjonen.');
     });
     body.appendChild(dp);
 
