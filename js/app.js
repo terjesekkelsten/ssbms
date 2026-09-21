@@ -45,6 +45,7 @@
   /* Tegnevalg. Farge huskes mellom økter — man holder seg som regel til én. */
   let drawPick = {
     color: localStorage.getItem('ssbms:drawcolor') || 'sort',
+    dash: localStorage.getItem('ssbms:drawdash') === '1',
     style: 'line'
   };
 
@@ -458,7 +459,8 @@
       case 'unit': return `Trykk i kartet: plasser ${p.cs}`;
       case 'selfpos': return 'Manuell posisjon — trykk i kartet';
       case 'los': return 'Siktlinje — trykk observasjonspunkt, så målpunkt';
-      case 'draw': return `${p.style === 'arrow' ? 'Pil' : 'Strek'} (${S.DRAW[p.color].label.toLowerCase()}) — ${
+      case 'draw': return `${p.dash ? 'Stiplet ' : ''}${p.style === 'arrow' ? 'pil' : 'strek'} (${
+        S.DRAW[p.color].label.toLowerCase()}) — ${
         p.pts.length < 2 ? 'trykk i kartet' : p.pts.length + ' punkter'}`;
       case 'link': return p.a
         ? 'Koble — trykk observasjon nummer to'
@@ -691,14 +693,23 @@
   function paintLine(layer, pts, { color, style, dashed, opacity = 1, onClick }) {
     const latlngs = utmToLatLngs(pts);
     const c = S.drawColor(color), halo = S.drawHalo(color);
+
+    /* Kontrastkanten MÅ ha samme stiplemønster som streken. Med heltrukken
+       kant under en stiplet strek fylles mellomrommene av kanten, og det hele
+       leses som en heltrukken strek i to farger. Mønsteret skaleres etter
+       strekbredden, ellers blir kanten synlig i hvert mellomrom. */
+    const DASH = '9 8';
+    const HALO_DASH = '9.5 7.5';
+
     L.polyline(latlngs, {
       color: halo, weight: 7, opacity: 0.5 * opacity, interactive: false,
-      lineCap: 'round', lineJoin: 'round'
+      lineCap: dashed ? 'butt' : 'round', lineJoin: 'round',
+      dashArray: dashed ? HALO_DASH : null
     }).addTo(layer);
     const line = L.polyline(latlngs, {
       color: c, weight: 3.2, opacity: 0.95 * opacity,
-      lineCap: 'round', lineJoin: 'round',
-      dashArray: dashed ? '8 6' : null,
+      lineCap: dashed ? 'butt' : 'round', lineJoin: 'round',
+      dashArray: dashed ? DASH : null,
       interactive: !!onClick
     });
     if (onClick) line.on('click', ev => { L.DomEvent.stop(ev.originalEvent || ev); onClick(); });
@@ -726,7 +737,9 @@
       if (!pts || pts.length < 2) return;
       paintLine(layers.draws, pts, {
         color: rec.color, style: rec.style,
-        dashed: !!rec.link,
+        // Poster fra før stiplevalget mangler feltet. De var stiplet hvis de
+        // var koblinger, og skal fortsatt se like ut.
+        dashed: rec.dash === undefined ? !!rec.link : !!rec.dash,
         onClick: () => openDrawSheet(rec)
       });
     });
@@ -739,7 +752,7 @@
     if (!isArmed('draw')) return;
     const pts = pending.pts;
     if (pts.length >= 2) {
-      paintLine(draftLayer, pts, { color: pending.color, style: pending.style, opacity: 0.7 });
+      paintLine(draftLayer, pts, { color: pending.color, style: pending.style, dashed: !!pending.dash, opacity: 0.7 });
     }
     utmToLatLngs(pts).forEach(ll => {
       L.circleMarker(ll, {
@@ -751,7 +764,7 @@
 
   function finishDraw() {
     if (!isArmed('draw') || pending.pts.length < 2) return;
-    const rec = St.makeDraw({ pts: pending.pts, style: pending.style, color: pending.color });
+    const rec = St.makeDraw({ pts: pending.pts, style: pending.style, color: pending.color, dash: pending.dash });
     const style = pending.style, n = pending.pts.length;
     setPending(null);
     St.publish(rec);
@@ -767,16 +780,17 @@
     }
     if (pending.a === rec.id) return SSBMSUI.toast('Velg en annen observasjon.', 'warn');
     const link = { a: pending.a, b: rec.id };
-    const color = pending.color, style = pending.style;
+    const color = pending.color, style = pending.style, dash = pending.dash;
     setPending(null);
-    St.publish(St.makeDraw({ pts: [], style, color, link }));
+    St.publish(St.makeDraw({ pts: [], style, color, dash, link }));
     SSBMSUI.toast('Observasjonene er koblet.');
   }
 
   function openDrawSheet(rec) {
     const linked = !!rec.link;
+    const dashNow = rec.dash === undefined ? linked : !!rec.dash;
     const body = el('div', 'drawsheet', `
-      <div class="kv"><span>Type</span><b>${rec.style === 'arrow' ? 'Pil' : 'Strek'}${linked ? ' (kobling)' : ''}</b></div>
+      <div class="kv"><span>Type</span><b>${dashNow ? 'Stiplet ' : ''}${rec.style === 'arrow' ? 'pil' : 'strek'}${linked ? ' (kobling)' : ''}</b></div>
       <div class="kv"><span>Tegnet av</span><b>${escapeHtml(rec.by || '—')}</b></div>
       <div class="kv"><span>Tid</span><b>${St.zulu(rec.ts)} (${St.ageText(rec.ts)} siden)</b></div>
       ${linked ? '<p class="muted small">Koblingen følger de to observasjonene. Flyttes en av dem, flytter streken seg med. Slettes en av dem, forsvinner streken.</p>' : ''}
@@ -787,6 +801,7 @@
           <option value="line"${rec.style === 'line' ? ' selected' : ''}>Strek</option>
           <option value="arrow"${rec.style === 'arrow' ? ' selected' : ''}>Pil</option>
         </select></label>
+      <label class="chk"><input type="checkbox" id="dDash" ${dashNow ? 'checked' : ''}> Stiplet</label>
       <label>Merknad <input id="dDesc" value="${escapeHtml(rec.desc || '')}" placeholder="valgfritt"></label>`);
 
     let col = rec.color;
@@ -808,6 +823,7 @@
             St.publish({
               ...rec, color: col,
               style: body.querySelector('#dStyle').value,
+              dash: body.querySelector('#dDash').checked,
               desc: body.querySelector('#dDesc').value,
               ts: Date.now()
             });
@@ -1279,6 +1295,26 @@
     });
     body.appendChild(cp);
 
+    /* Stiplet er en egenskap ved streken, ikke en egen strektype: den skal
+       kunne kombineres med både strek, pil og kobling. Derfor en bryter her,
+       ved siden av fargen, og ikke fire knapper under. */
+    const sp = el('div', 'colpick two', '');
+    const styles = [
+      { key: false, label: 'Heltrukket', svg: '<svg viewBox="0 0 48 12" width="52" height="12"><path d="M3 6 H45" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" fill="none"/></svg>' },
+      { key: true,  label: 'Stiplet',    svg: '<svg viewBox="0 0 48 12" width="52" height="12"><path d="M3 6 H45" stroke="currentColor" stroke-width="3.4" stroke-linecap="butt" stroke-dasharray="9 7" fill="none"/></svg>' }
+    ];
+    styles.forEach(o => {
+      const b = el('button', 'colbtn' + (o.key === drawPick.dash ? ' on' : ''), `${o.svg}<span>${o.label}</span>`);
+      b.onclick = () => {
+        drawPick.dash = o.key;
+        localStorage.setItem('ssbms:drawdash', o.key ? '1' : '0');
+        sp.querySelectorAll('.colbtn').forEach(x => x.classList.remove('on'));
+        b.classList.add('on');
+      };
+      sp.appendChild(b);
+    });
+    body.appendChild(sp);
+
     const dp = el('div', 'locpick', '');
     const drawBtn = (label, svg, onClick) => {
       const b = el('button', 'locbtn', `${svg}<span>${label}</span>`);
@@ -1291,18 +1327,18 @@
 
     drawBtn('Strek', lineIcon, () => {
       sh.close();
-      setPending({ kind: 'draw', style: 'line', color: drawPick.color, pts: [] });
+      setPending({ kind: 'draw', style: 'line', color: drawPick.color, dash: drawPick.dash, pts: [] });
       SSBMSUI.toast('Trykk i kartet for hvert punkt. «Ferdig» når streken er klar.');
     });
     drawBtn('Pil', arrowIcon, () => {
       sh.close();
-      setPending({ kind: 'draw', style: 'arrow', color: drawPick.color, pts: [] });
+      setPending({ kind: 'draw', style: 'arrow', color: drawPick.color, dash: drawPick.dash, pts: [] });
       SSBMSUI.toast('Trykk start, så videre punkter. Pilhodet havner på det siste.');
     });
     drawBtn('Koble observasjoner', linkIcon, () => {
       if (St.activePOIs().length < 2) return SSBMSUI.toast('Det må finnes minst to observasjoner å koble.', 'warn');
       sh.close();
-      setPending({ kind: 'link', style: 'arrow', color: drawPick.color, a: null });
+      setPending({ kind: 'link', style: 'arrow', color: drawPick.color, dash: drawPick.dash, a: null });
       SSBMSUI.toast('Trykk den første observasjonen.');
     });
     body.appendChild(dp);

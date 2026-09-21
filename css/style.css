@@ -490,6 +490,8 @@ label.chk input[type=checkbox] {
 .mission h3 { margin: 18px 0 8px; }
 .mission h3:first-child { margin-top: 2px; }
 .colpick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 4px; }
+.colpick.two { grid-template-columns: 1fr 1fr; margin-top: 8px; }
+.colpick.two svg { display: block; }
 .colbtn {
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   padding: 10px 4px; background: rgba(255,255,255,.04); border: 1px solid var(--line);
@@ -500,6 +502,8 @@ label.chk input[type=checkbox] {
   box-shadow: 0 0 0 1px rgba(255,255,255,.35), 0 1px 3px rgba(0,0,0,.6);
 }
 .colbtn.on { border-color: var(--accent); color: var(--fg); background: rgba(0,200,83,.12); }
+.drawsheet .chk { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+.drawsheet .chk input { width: 20px; height: 20px; min-height: 0; flex: none; margin: 0; accent-color: var(--accent); }
 .draw-arrow { transform-origin: 50% 50%; }
 .mb-ok, .mb-undo {
   flex: none; padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 600;

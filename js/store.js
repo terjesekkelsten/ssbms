@@ -275,11 +275,14 @@ const SSBMSStore = (() => {
    * link != null betyr at streken folger to observasjoner i stedet for faste
    * punkter - da flytter den seg med dem, og forsvinner hvis en av dem slettes.
    */
-  function makeDraw({ pts, style, color, desc, id, link, by, ts }) {
+  function makeDraw({ pts, style, color, dash, desc, id, link, by, ts }) {
     return {
       t: 'drw', id: id || uid(),
       style: style === 'arrow' ? 'arrow' : 'line',
       color: color || 'sort',
+      /* Eksplisitt felt, ikke utledet av link. Eldre poster mangler det, og
+         leses da som stiplet hvis de er koblinger - se renderDraws. */
+      dash: !!dash,
       pts: (pts || []).map(p => { const l = toLocal(p.e, p.n); return [l.de, l.dn]; }),
       link: link || null,
       desc: desc || '',

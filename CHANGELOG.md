@@ -31,13 +31,18 @@ Ingenting ennå.
   ⚑ **Oppdrag** sammen med tegning. Ett ark for alt som beskriver oppdraget,
   i stedet for en flytknapp per ting.
 - **Tegning på kartet.** Streker og piler med fritt antall punkter, i sort,
-  rød, grønn og hvit. Hver strek tegnes med kontrastkant under, slik at sort
-  er lesbar på skygge og hvit på snø. Trykk på en ferdig strek for å endre
-  farge og form eller slette den. Fargevalget huskes mellom økter.
+  rød, grønn og hvit, **heltrukket eller stiplet**. Hver strek tegnes med
+  kontrastkant under, slik at sort er lesbar på skygge og hvit på snø —
+  kanten stiples sammen med streken, ellers ville den fylt mellomrommene og
+  hele streken lest som heltrukken i to farger. Stiplet er en egenskap ved
+  streken, ikke en egen strektype, så den kombineres fritt med strek, pil og
+  kobling. Trykk på en ferdig strek for å endre farge, form og stipling eller
+  slette den. Farge og strektype huskes mellom økter.
 - **Kobling mellom observasjoner.** Velg to observasjoner, og streken følger
   dem. Flytter observasjonen seg, flytter koblingen seg med. Slettes en av
   endene, forsvinner streken — en kobling til noe som ikke finnes er verre enn
-  ingen kobling. Koblinger tegnes stiplet for å skille dem fra faste streker.
+  ingen kobling. Koblinger følger samme stiplevalg som resten; trykk på
+  streken for å se om den er en kobling.
 - **Bilder på observasjoner og egen sektor.** Egne knapper for **Ta bilde**
   og **Velg bilde** — på iPhone åpner `capture="environment"` kameraet direkte
   og fjerner fotobiblioteket fra valgene, så begge deler må finnes. Bildet
