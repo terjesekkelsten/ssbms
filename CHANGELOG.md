@@ -38,9 +38,16 @@ Ingenting ennå.
   dem. Flytter observasjonen seg, flytter koblingen seg med. Slettes en av
   endene, forsvinner streken — en kobling til noe som ikke finnes er verre enn
   ingen kobling. Koblinger tegnes stiplet for å skille dem fra faste streker.
-- **Bilder på observasjoner og egen sektor.** Miniatyr på maks 10 kB,
-  komprimert automatisk og kryptert som alt annet. Flere bilder per
-  observasjon. Se begrensningen under «Kjente begrensninger».
+- **Bilder på observasjoner og egen sektor.** Egne knapper for **Ta bilde**
+  og **Velg bilde** — på iPhone åpner `capture="environment"` kameraet direkte
+  og fjerner fotobiblioteket fra valgene, så begge deler må finnes. Bildet
+  komprimeres automatisk til det passer, og krypteres som alt annet. Flere
+  bilder per observasjon. Se «Kjente begrensninger».
+- **Køen kan ikke lenger forgiftes.** En post serveren avviser (feil type, for
+  stor nyttelast) ble tidligere liggende fremst i køen for alltid — og siden
+  `flush()` stopper på første feil, ville ett avvist bilde stanset også
+  posisjonsrapportene. Avviste poster forkastes nå med et varsel til brukeren,
+  og transportfeil gis åtte forsøk før posten gis opp.
 - **Snarvei til sektorarket.** Trykk på egen enhet på kartet → «Sektor og
   retning» rett i arket.
 - **Aldersfilter på observasjoner.** ⏱ i verktøylinja skjuler observasjoner
@@ -75,12 +82,34 @@ Ingenting ennå.
   en manuell posisjon settes gjerne nettopp når mottaket er dårlig eller
   batteriet skal spares.
 
+### Rettet (bilder, samme dag)
+
+- **«Bildet lar seg ikke komprimere nok» på iPhone.** Årsaken var ikke
+  budsjettet, men at WebKits `canvas.toDataURL` ignorerer kvalitetsargumentet
+  for JPEG. Kvalitetssløyfen gjorde ingenting — bare bredden hadde effekt — og
+  selv nederste trinn havnet over taket. Koding går nå via `toBlob`, som
+  respekterer kvaliteten, med `toDataURL` som reserve.
+- **Gjetningen på oppblåsingsfaktoren er erstattet med måling.** Klienten
+  krypterer hvert komprimeringsforsøk og måler den faktiske chifferteksten
+  (`SSBMSSync.cipherLength`) mot nøyaktig det taket serveren håndhever. Målt
+  faktor er **1,34×**, ikke 1,8× som først antatt. Feilmeldingen oppgir nå
+  oppnådd oppløsning og størrelse, slik at et avvist bilde er mulig å feilsøke.
+- **Filvelgeren ga bare kamera på iPhone.** Nå to knapper: «Ta bilde» og
+  «Velg bilde».
+
 ### Kjente begrensninger
 
-- **Bilder er miniatyrer.** `ssbms_put` tar maks 20 000 tegn chiffertekst, og
-  base64 → AES → base64 gir ca. 1,8× oppblåsing. Budsjettet blir rundt 10 kB
-  bilde: nok til å vise hva du ser, ikke til å lese et skilt. Full oppløsning
-  krever Supabase Storage med eget herdet policy-sett — se veikartet.
+- **Bilder er miniatyrer med standardskjemaet.** `ssbms_put` tar maks 20 000
+  tegn chiffertekst, som med målt faktor 1,34× gir ca. **11 kB bilde** — i
+  praksis 320–400 px. Nok til å vise hva du ser, ikke til å lese et skilt.
+- **Dette kan heves uten Storage.** `supabase/2026-09-21-storre-bilder.sql`
+  setter taket til 150 000 tegn ≈ **84 kB bilde**, altså 800 px i god
+  kvalitet, og holder seg under Supabase Realtimes tak på 256 kB per
+  kringkastet melding. Migreringen er rent utvidende. **Kjør den før du hever
+  `photos.maxCipherChars` i `js/config.js` og deployer** — motsatt vei blir
+  bildene avvist (men de blokkerer ikke lenger køen).
+- Full oppløsning krever fortsatt Supabase Storage med eget herdet
+  policy-sett — se veikartet.
 - Tegninger og bilder sendes med transportetiketten `loc`, fordi
   check-constrainten i `ssbms_put` bare godtar `pos`, `poi` og `loc`. Se
   kommentaren i `js/store.js`. Ingen skjemaendring er nødvendig for denne

@@ -87,6 +87,10 @@ begin
   if p_kind not in ('pos', 'poi', 'loc') then
     raise exception 'ugyldig type';
   end if;
+  -- Taket MÅ stemme med photos.maxCipherChars i js/config.js. Klienten måler
+  -- den faktiske chifferteksten før den sender, så tallet er hele budsjettet.
+  -- Skal det heves for større bilder: se supabase/2026-09-21-storre-bilder.sql,
+  -- og kjør migreringen FØR klienten deployes med et høyere tall.
   if length(p_ref) > 64 or length(p_iv) > 32 or length(p_ct) > 20000 then
     raise exception 'for stor nyttelast';
   end if;

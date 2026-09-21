@@ -44,15 +44,27 @@ window.SSBMS_CONFIG = {
     staleMinutes: 10
   },
 
-  /* Bilder. Miniatyrer gar gjennom den samme krypterte kanalen som alt annet,
-     og ssbms_put tar maks 20 000 tegn chiffertekst. Base64 + AES + base64 gir
-     omtrent 1,8x oppblasing, sa taket i praksis er ca. 10 kB bilde. Det er en
-     miniatyr - ikke dokumentasjonsfoto. Full opplosning krever Supabase
-     Storage, se CHANGELOG / veikart. */
+  /* Bilder. De går gjennom den samme krypterte kanalen som alt annet.
+   *
+   * maxCipherChars MÅ stemme med length(p_ct)-grensen i ssbms_put. Klienten
+   * måler den faktiske chifferteksten før den sender (SSBMSSync.cipherLength),
+   * så dette tallet er hele budsjettet - ingen gjetning på oppblåsingsfaktor.
+   *
+   * Målt faktor base64 → chiffertekst er 1,34x (verifisert mot ekte AES-GCM,
+   * ikke anslått):
+   *
+   *   20 000  = standardskjemaet. Gir ca. 11 kB bilde, altså rundt 400 px.
+   *  150 000  = etter supabase/2026-09-21-storre-bilder.sql. Gir ca. 84 kB,
+   *             altså rundt 800 px i god kvalitet. Holder seg under
+   *             Realtime-taket på 256 kB per kringkastet melding.
+   *
+   * REKKEFØLGE: kjør migreringen FØR du hever tallet her og deployer. Motsatt
+   * vei blir bildene avvist av serveren. (De blokkerer riktignok ikke køen -
+   * se flush() i store.js - men de kommer ikke fram.) */
   photos: {
-    maxBytes: 10000,
-    widths: [480, 384, 320, 256],
-    qualities: [0.6, 0.5, 0.42, 0.34]
+    maxCipherChars: 20000,
+    widths: [800, 640, 512, 400, 320, 256, 192],
+    qualities: [0.6, 0.45, 0.33, 0.24]
   },
 
   /* Offline-nedlasting: hvor mange zoomnivåer over gjeldende som hentes. */

@@ -114,7 +114,14 @@ const SSBMSSync = (() => {
             p_room: roomId, p_kind: item.kind, p_ref: item.ref,
             p_iv: env.iv, p_ct: env.ct
           });
-          if (error) { console.warn('[ssbms] sending feilet:', error.message); return false; }
+          if (error) {
+            /* Serveren har svart, og svaret er nei. ssbms_put validerer rom,
+               type og størrelse - ingen av delene blir sannere av å prøve på
+               nytt. Å holde posten i køen ville blokkert alt bak den, inkludert
+               posisjonsrapportene, fordi flush() stopper på første feil. */
+            console.warn('[ssbms] avvist av serveren:', error.message);
+            return { drop: true, reason: error.message };
+          }
 
           // Så ut til dem som er på nå. Feiler dette, er raden likevel lagret,
           // så vi regner sendingen som vellykket og lar mottakeren hente den.
@@ -124,6 +131,7 @@ const SSBMSSync = (() => {
           }
           return true;
         } catch (e) {
+          // Unntak = transport, ikke validering. Dette skal prøves igjen.
           console.warn('[ssbms] sending feilet:', e);
           return false;
         }
@@ -173,8 +181,29 @@ const SSBMSSync = (() => {
     return { roomId, backend: backend.name };
   }
 
+  /**
+   * Faktisk chiffertekstlengde for en post, slik serveren kommer til å se den.
+   *
+   * Bildekomprimeringen brukte tidligere en antatt oppblåsingsfaktor på 1,8x
+   * fra base64 → JSON → AES → base64. Den slags nesten-riktig gjetning feiler
+   * nettopp der det koster mest: i felt, med et bilde som ble avvist uten at
+   * noen kunne si hvorfor. Her måler vi i stedet.
+   *
+   * @returns {Promise<number|null>} antall tegn, eller null før nøkkelen finnes.
+   */
+  async function cipherLength(rec) {
+    if (!aesKey) return null;
+    try {
+      const env = await SSBMSKey.encryptJSON(aesKey, rec);
+      return env.ct.length;
+    } catch (e) {
+      console.warn('[ssbms] måling feilet:', e);
+      return null;
+    }
+  }
+
   function stop() { if (backend) backend.disconnect(); }
   function reload() { return backend && backend.loadAll ? backend.loadAll() : null; }
 
-  return { start, stop, reload };
+  return { start, stop, reload, cipherLength };
 })();

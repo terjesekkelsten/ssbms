@@ -283,6 +283,11 @@
     wireToolbar();
     trackQuickbarHeight();
     St.on(() => { render(); renderStatus(); });
+    St.setDropHandler((item, reason) => {
+      const hva = { pos: 'Posisjonen', poi: 'Observasjonen', loc: 'Lokasjonen',
+                    drw: 'Tegningen', pho: 'Bildet' }[item.rec && item.rec.t] || 'En post';
+      SSBMSUI.toast(`${hva} ble ikke delt: ${reason}. Den ligger fortsatt på din enhet.`, 'warn');
+    });
 
     startGeolocation();
     render();
@@ -1968,50 +1973,120 @@
     });
   }
 
-  async function compressPhoto(file) {
+  /**
+   * Komprimerer til det faktisk passer gjennom ssbms_put.
+   *
+   * Den forrige utgaven gjettet på oppblåsingsfaktoren base64 → JSON → AES →
+   * base64 og sammenlignet mot et antall bytes. Gjetningen traff ikke, og
+   * resultatet var et bilde som ble avvist med «lar seg ikke komprimere nok»
+   * uten at noen kunne se hvorfor. Nå krypteres hvert forsøk og chifferteksten
+   * måles — det er nøyaktig det tallet serveren håndhever.
+   *
+   * Vi går fra stort til smått og returnerer det FØRSTE som passer, slik at du
+   * får den beste kvaliteten budsjettet tillater, ikke den minste.
+   */
+  /**
+   * JPEG-koding via toBlob, ikke toDataURL.
+   *
+   * Dette er den faktiske årsaken til «lar seg ikke komprimere nok» på iPhone:
+   * WebKits toDataURL har historisk ignorert kvalitetsargumentet for JPEG og
+   * levert noe i nærheten av 0,9 uansett hva man ber om. Kvalitetssløyfen
+   * gjorde derfor ingenting — bare bredden hadde effekt — og selv nederste
+   * trinn havnet over budsjettet. toBlob respekterer kvaliteten.
+   *
+   * toDataURL beholdes som reserve for nettlesere uten toBlob.
+   */
+  function encodeJPEG(cv, q) {
+    const fallback = () => {
+      const url = cv.toDataURL('image/jpeg', q);
+      return url.slice(url.indexOf(',') + 1);
+    };
+    return new Promise(resolve => {
+      if (!cv.toBlob) return resolve(fallback());
+      let settled = false;
+      const done = v => { if (!settled) { settled = true; resolve(v); } };
+      // Safari har ved enkelte anledninger latt være å kalle tilbake i det
+      // hele tatt. Da er en litt for stor reserve bedre enn et hengt ark.
+      setTimeout(() => done(fallback()), 4000);
+      cv.toBlob(blob => {
+        if (!blob) return done(fallback());
+        const fr = new FileReader();
+        fr.onload = () => { const u = String(fr.result); done(u.slice(u.indexOf(',') + 1)); };
+        fr.onerror = () => done(fallback());
+        fr.readAsDataURL(blob);
+      }, 'image/jpeg', q);
+    });
+  }
+
+  async function compressPhoto(file, ref) {
     const src = await loadBitmap(file);
     const sw = src.width || src.naturalWidth;
     const sh = src.height || src.naturalHeight;
     if (!sw || !sh) throw new Error('tomt bilde');
+
+    const max = CFG.photos.maxCipherChars;
     const cv = document.createElement('canvas');
     const ctx = cv.getContext('2d');
+    let best = null;   // minste forsøk, til feilmeldingen
+
     for (const w of CFG.photos.widths) {
       const scale = Math.min(1, w / Math.max(sw, sh));
       cv.width = Math.max(1, Math.round(sw * scale));
       cv.height = Math.max(1, Math.round(sh * scale));
       ctx.clearRect(0, 0, cv.width, cv.height);
       ctx.drawImage(src, 0, 0, cv.width, cv.height);
+
       for (const q of CFG.photos.qualities) {
-        const url = cv.toDataURL('image/jpeg', q);
-        const b64 = url.slice(url.indexOf(',') + 1);
+        const b64 = await encodeJPEG(cv, q);
         const bytes = Math.round(b64.length * 0.75);
-        if (bytes <= CFG.photos.maxBytes) return { b64, bytes, w: cv.width, h: cv.height };
+        best = { w: cv.width, h: cv.height, q, bytes, ct: null };
+
+        // Chifferteksten er alltid større enn klarteksten. Er base64-strengen
+        // alene over taket, er det ingen vits i å kryptere for å få vite det.
+        if (b64.length >= max) continue;
+
+        const ct = await SSBMSSync.cipherLength(St.makePhoto({ ref, img: b64 }));
+        best.ct = ct;
+        if (ct == null || ct <= max) return { b64, w: cv.width, h: cv.height, bytes, ct };
       }
     }
-    return null;
+    return { failed: true, ...best };
   }
 
-  function attachPhoto(ref, done) {
+  /**
+   * Filvelger. iPhone er grunnen til at dette er to knapper og ikke én:
+   * capture="environment" åpner kameraet DIREKTE og fjerner «Fotobibliotek»
+   * fra valgene. Uten attributtet får du bibliotek, filer og kamera i samme
+   * arkivalg. Begge deler trengs — du tar bilde i øyeblikket, eller legger ved
+   * et du tok før du hadde dekning.
+   */
+  function pickPhoto(ref, { camera }, done) {
     const inp = document.createElement('input');
     inp.type = 'file';
     inp.accept = 'image/*';
-    inp.capture = 'environment';
+    if (camera) inp.setAttribute('capture', 'environment');
     inp.style.display = 'none';
     document.body.appendChild(inp);
+
     inp.onchange = async () => {
       const file = inp.files && inp.files[0];
       inp.remove();
       if (!file) return;
       SSBMSUI.toast('Komprimerer bilde…');
       try {
-        const r = await compressPhoto(file);
-        if (!r) return SSBMSUI.toast('Bildet lar seg ikke komprimere nok til å sendes. Prøv et motiv med mindre detaljer.', 'warn');
+        const r = await compressPhoto(file, ref);
+        if (r.failed) {
+          console.warn('[ssbms] bilde for stort', r);
+          return SSBMSUI.toast(
+            `Bildet passer ikke: ${r.w}×${r.h} ga ${Math.round((r.ct || r.bytes * 1.35) / 1000)} kB kryptert, ` +
+            `taket er ${Math.round(CFG.photos.maxCipherChars / 1000)} kB. Prøv et motiv med mindre detaljer.`, 'warn');
+        }
         St.publish(St.makePhoto({ ref, img: r.b64 }));
         SSBMSUI.toast(`Bilde lagt ved — ${r.w}×${r.h}, ${Math.max(1, Math.round(r.bytes / 1024))} kB.`);
         if (done) done();
       } catch (e) {
         console.warn('[ssbms] bilde:', e);
-        SSBMSUI.toast('Kunne ikke lese bildet.', 'warn');
+        SSBMSUI.toast('Kunne ikke lese bildet: ' + ((e && e.message) || e), 'warn');
       }
     };
     inp.click();
@@ -2030,14 +2105,21 @@
         b.onclick = () => openPhotoViewer(rec, redraw);
         strip.appendChild(b);
       });
-      const add = el('button', 'photo add', '<span>📷</span>');
-      add.title = 'Legg ved bilde';
-      add.onclick = () => attachPhoto(ref, redraw);
-      strip.appendChild(add);
+      const cam = el('button', 'photo add', '<span>📷</span><em>Ta bilde</em>');
+      cam.title = 'Ta bilde med kameraet';
+      cam.onclick = () => pickPhoto(ref, { camera: true }, redraw);
+      strip.appendChild(cam);
+
+      const lib = el('button', 'photo add', '<span>🖼</span><em>Velg bilde</em>');
+      lib.title = 'Velg et bilde du allerede har';
+      lib.onclick = () => pickPhoto(ref, { camera: false }, redraw);
+      strip.appendChild(lib);
+
       box.appendChild(strip);
       if (!ps.length) {
         box.appendChild(el('p', 'muted small',
-          'Miniatyr på ca. 10 kB, kryptert som alt annet. Nok til å vise hva du ser — ikke til å lese skilt.'));
+          `Miniatyr på maks ${Math.round(CFG.photos.maxCipherChars / 1000)} kB kryptert, komprimert automatisk. ` +
+          'Nok til å vise hva du ser — ikke til å lese et skilt.'));
       }
     };
     redraw();

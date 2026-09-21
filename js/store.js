@@ -153,6 +153,17 @@ const SSBMSStore = (() => {
   let sendFn = async () => false;
   function setSender(fn) { sendFn = fn; }
 
+  /* Varsling når en post forkastes. Uten dette ville en avvist post forsvinne
+     i stillhet - og «jeg trodde jeg delte» er den verste feilen dette systemet
+     kan gjøre. */
+  let dropFn = () => {};
+  function setDropHandler(fn) { dropFn = fn; }
+
+  /* Etter så mange mislykkede forsøk forkastes posten uansett årsak. En post
+     som ikke kommer gjennom etter dette kommer neppe gjennom, og køen er
+     seriell: alt bak den står stille så lenge den ligger fremst. */
+  const MAX_TRIES = 8;
+
   async function publish(rec) {
     apply(rec, { local: true });
     if (state.emcon) return;                       // lyttemodus: ingen utsending
@@ -168,10 +179,29 @@ const SSBMSStore = (() => {
     try {
       while (state.outbox.length) {
         const item = state.outbox[0];
-        const ok = await sendFn(item);
-        if (!ok) break;
-        state.outbox.shift();
+        const res = await sendFn(item);
+
+        if (res === true) { state.outbox.shift(); persist(); continue; }
+
+        /* Serveren har svart nei. Å prøve igjen gir samme svar, og posten
+           ville blitt liggende fremst i køen og sperret for alt bak - også
+           posisjonsrapportene. Den forkastes, og brukeren får vite det. */
+        if (res && res.drop) {
+          state.outbox.shift();
+          persist();
+          try { dropFn(item, res.reason || 'avvist av serveren'); } catch (e) { console.error(e); }
+          continue;
+        }
+
+        item.tries = (item.tries || 0) + 1;
+        if (item.tries >= MAX_TRIES) {
+          state.outbox.shift();
+          persist();
+          try { dropFn(item, `ga opp etter ${MAX_TRIES} forsøk`); } catch (e) { console.error(e); }
+          continue;
+        }
         persist();
+        break;   // transportfeil: behold posten og prøv igjen senere
       }
     } finally {
       flushing = false;
@@ -312,7 +342,7 @@ const SSBMSStore = (() => {
     state, on, emit, uid,
     toLocal, fromLocal, recordLatLng, recordUTM,
     restore, persist, wipe, loadSelfName, saveSelfName, displayName,
-    apply, publish, remove, setSender, setOnline, flush,
+    apply, publish, remove, setSender, setDropHandler, setOnline, flush,
     makePosition, makePOI, makeLoc, makeUnitPlacement, makeDraw, makePhoto,
     drawLatLngs,
     activePOIs, activeLocs, activeUnits, activeDraws, photosFor,
