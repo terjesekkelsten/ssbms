@@ -43,6 +43,17 @@ Ingenting ennå.
   observasjon. Se begrensningen under «Kjente begrensninger».
 - **Snarvei til sektorarket.** Trykk på egen enhet på kartet → «Sektor og
   retning» rett i arket.
+- **Aldersfilter på observasjoner.** ⏱ i verktøylinja skjuler observasjoner
+  eldre enn 15 min, 1, 4, 12 eller 24 timer. Filteret måler mot
+  observasjonstidspunktet, ikke mot når posten sist ble redigert — en
+  observasjon du retter en skrivefeil i blir ikke ferskere av det. Det gjelder
+  både kartet og lista, og et aktivt filter vises alltid som et merke i
+  topplinja: et filter som skjuler halve situasjonsbildet uten at du ser det
+  er en felle, særlig hvis det sto på fra forrige økt. Enheter, lokasjoner og
+  tegninger skjules aldri, og en kobling til en skjult observasjon skjules
+  sammen med den. Ingenting slettes — de andre i troppen ser fortsatt alt.
+- **Tid siden på observasjoner.** Observasjonsarket viser nå både
+  tidspunkt (Zulu) og hvor lenge det er siden.
 - **Versjonsnummer i appen**, i sesjonsinfo og nederst i menyen.
 - **Denne endringsloggen.**
 

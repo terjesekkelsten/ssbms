@@ -527,3 +527,7 @@ label.chk input[type=checkbox] {
   margin: 14px 0 0; text-align: center; font: 600 11px ui-monospace, monospace;
   letter-spacing: 1px; color: var(--fg-dim);
 }
+
+/* ---------- Alder i ark ---------- */
+.kv .age { color: var(--fg-dim); font-weight: 600; }
+.kv .age.stale { color: var(--warn); }

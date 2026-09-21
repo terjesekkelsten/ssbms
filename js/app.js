@@ -22,11 +22,27 @@
   /* GPS-bryter. Var tidligere implisitt: en manuell posisjon ble satt, og
      neste watchPosition-oppdatering overskrev den uten et ord. Er du under
      tett skog eller i en kjeller er den manuelle posisjonen den RIKTIGE, og
-     da skal maskinen ikke overprove deg. Manuell posisjon slar derfor GPS av
-     til du slar den pa igjen. */
+     da skal maskinen ikke overprøve deg. Manuell posisjon slår derfor GPS av
+     til du slår den på igjen. */
   let gpsOn = true;
 
-  /* Tegnevalg. Farge huskes mellom okter - man holder seg som regel til en. */
+  /* Aldersfilter for observasjoner. 0 = vis alle. Huskes mellom økter, men
+     vises alltid som et merke i topplinja: et filter som skjuler halve
+     situasjonsbildet uten at du ser det er en felle — særlig hvis det sto på
+     fra forrige økt. Filteret måler mot observasjonstidspunktet (obsTs), ikke
+     mot når posten sist ble endret: en observasjon du retter en skrivefeil i
+     blir ikke ferskere av det. */
+  const AGE_OPTIONS = [
+    { label: 'Vis alle',    tag: '',        ms: 0 },
+    { label: '15 minutter', tag: '≤15 MIN', ms: 15 * 60 * 1000 },
+    { label: '1 time',      tag: '≤1 T',    ms: 60 * 60 * 1000 },
+    { label: '4 timer',     tag: '≤4 T',    ms: 4 * 3600 * 1000 },
+    { label: '12 timer',    tag: '≤12 T',   ms: 12 * 3600 * 1000 },
+    { label: '24 timer',    tag: '≤24 T',   ms: 24 * 3600 * 1000 }
+  ];
+  let ageFilterMs = Number(localStorage.getItem('ssbms:agefilter')) || 0;
+
+  /* Tegnevalg. Farge huskes mellom økter — man holder seg som regel til én. */
   let drawPick = {
     color: localStorage.getItem('ssbms:drawcolor') || 'sort',
     style: 'line'
@@ -477,6 +493,48 @@
    *  Tegning
    * ========================================================= */
 
+  /* ---------- aldersfilter ---------- */
+
+  /** Observasjonstid: da det ble sett, ikke da posten sist ble redigert. */
+  function obsTime(rec) { return rec.obsTs || rec.ts; }
+
+  function hiddenByAge(rec) {
+    return !!ageFilterMs && rec.t === 'poi' && (Date.now() - obsTime(rec)) > ageFilterMs;
+  }
+
+  /** Observasjonene som skal tegnes og listes nå. */
+  function visiblePOIs() { return St.activePOIs().filter(r => !hiddenByAge(r)); }
+
+  function setAgeFilter(ms) {
+    ageFilterMs = ms || 0;
+    localStorage.setItem('ssbms:agefilter', String(ageFilterMs));
+    const b = $('#btnAge');
+    if (b) b.classList.toggle('on', !!ageFilterMs);
+    render();
+    renderStatus();
+    const opt = AGE_OPTIONS.find(o => o.ms === ageFilterMs);
+    SSBMSUI.toast(ageFilterMs
+      ? `Viser kun observasjoner fra siste ${opt.label.toLowerCase()}.`
+      : 'Viser alle observasjoner.');
+  }
+
+  function openAgeSheet() {
+    const body = el('div', 'menu', '');
+    AGE_OPTIONS.forEach(o => {
+      const hides = o.ms ? St.activePOIs().filter(r => (Date.now() - obsTime(r)) > o.ms).length : 0;
+      const b = el('button', 'mi' + (o.ms === ageFilterMs ? ' warnrow' : ''),
+        `${o.ms === ageFilterMs ? '✓ ' : ''}${o.ms ? 'Siste ' + o.label.toLowerCase() : 'Vis alle observasjoner'}` +
+        (hides ? ` <span class="muted small">— skjuler ${hides}</span>` : ''));
+      b.onclick = () => { sh.close(); setAgeFilter(o.ms); };
+      body.appendChild(b);
+    });
+    body.appendChild(el('p', 'muted small',
+      'Filteret gjelder observasjoner, både på kartet og i lista. Enheter, ' +
+      'lokasjoner og tegninger skjules aldri. Ingenting slettes — filteret er ' +
+      'kun din visning, og de andre i troppen ser fortsatt alt.'));
+    const sh = SSBMSUI.sheet({ title: 'Skjul gamle observasjoner', body });
+  }
+
   function icon(svg, size, anchor, cls) {
     return L.divIcon({
       html: svg, className: cls || 'sym', iconSize: size,
@@ -540,7 +598,7 @@
   }
 
   function renderPOIs() {
-    syncLayer('pois', St.activePOIs(), r => r.id, rec => {
+    syncLayer('pois', visiblePOIs(), r => r.id, rec => {
       const ll = St.recordLatLng(rec);
       const g = L.layerGroup();
       const m = L.marker([ll.lat, ll.lng], {
@@ -611,6 +669,9 @@
     if (rec.link) {
       const a = findRec(rec.link.a), b = findRec(rec.link.b);
       if (!a || !b || a.deleted || b.deleted) return null;
+      // Skjult av aldersfilteret teller som borte: en strek til noe brukeren
+      // ikke ser, er verre enn ingen strek.
+      if (hiddenByAge(a) || hiddenByAge(b)) return null;
       return [St.recordUTM(a), St.recordUTM(b)];
     }
     return (rec.pts || []).map(([de, dn]) => St.fromLocal(de, dn));
@@ -933,9 +994,14 @@
   }
 
   function openPOISheet(rec) {
+    const alder = St.ageText(obsTime(rec));
+    const gammel = !!ageFilterMs && (Date.now() - obsTime(rec)) > ageFilterMs;
     const body = el('div', '', `
       <div class="kv"><span>Rute</span><b class="mono">${gridLine(rec)}</b></div>
+      <div class="kv"><span>Observert</span><b>${St.zulu(obsTime(rec))}
+        <span class="age${St.isStale(rec) ? ' stale' : ''}">· ${alder} siden</span></b></div>
       <div class="kv"><span>Meldt av</span><b>${rec.by || '—'}</b></div>
+      ${gammel ? '<p class="caveat">Denne observasjonen er eldre enn aldersfilteret ditt og vises ikke på kartet nå.</p>' : ''}
       <div class="grid2">
         <label>Type
           <select id="pType">${S.POI_ORDER.map(t =>
@@ -1029,6 +1095,9 @@
       SSBMSMap.setBaseLayer(next);
       SSBMSUI.toast('Kart: ' + SSBMSMap.LAYERS[next]);
     };
+
+    $('#btnAge').onclick = openAgeSheet;
+    $('#btnAge').classList.toggle('on', !!ageFilterMs);
 
     $('#btnSector').onclick = openSectorSheet;
     $('#btnCentre').onclick = () => {
@@ -1623,6 +1692,13 @@
     conn.textContent = St.state.emcon ? 'LYTTER' : (St.state.online ? 'PÅ NETT' : 'AV NETT');
     conn.className = 'tag ' + (St.state.emcon ? 'emcon' : (St.state.online ? 'ok' : 'bad'));
     $('#queueTag').textContent = St.state.outbox.length ? St.state.outbox.length + ' i kø' : '';
+    const at = $('#ageTag');
+    if (at) {
+      const opt = AGE_OPTIONS.find(o => o.ms === ageFilterMs) || AGE_OPTIONS[0];
+      at.textContent = opt.tag;
+      at.className = 'tag' + (ageFilterMs ? ' emcon' : '');
+      at.title = ageFilterMs ? `Observasjoner eldre enn ${opt.label.toLowerCase()} er skjult.` : '';
+    }
     const gt = $('#gpsTag');
     if (gt) {
       gt.textContent = gpsOn ? '' : 'GPS AV';
@@ -1641,7 +1717,8 @@
     const box = $('#sideBody');
     if (!box) return;
     const units = St.activeUnits().sort((a, b) => a.cs.localeCompare(b.cs));
-    const pois = St.activePOIs().sort((a, b) => b.ts - a.ts);
+    const pois = visiblePOIs().sort((a, b) => obsTime(b) - obsTime(a));
+    const skjult = St.activePOIs().length - pois.length;
     const locs = St.activeLocs();
 
     box.innerHTML =
@@ -1653,7 +1730,8 @@
           ${r.name ? `<span class="rname">${escapeHtml(r.name)}</span>` : ''}
           <span class="mono">${G.toShortGrid(St.recordUTM(r).e, St.recordUTM(r).n)}</span>
           <span class="age ${St.isStale(r) ? 'stale' : ''}">${St.ageText(r.ts)}</span></div>`).join('') || '<p class="muted">Ingen.</p>') +
-      `<h3>Observasjoner (${pois.length})</h3>` +
+      `<h3>Observasjoner (${pois.length})${skjult
+        ? ` <span class="muted small">— ${skjult} skjult av aldersfilteret</span>` : ''}</h3>` +
       (pois.map(r => `<div class="row" data-goto="${r.id}" data-kind="poi">
           <span class="dot" style="--c:${S.AFFIL[r.affil].color}"></span>
           <b>${S.POI[r.type].short}${r.count ? ' ×' + r.count : ''}</b>
