@@ -23,6 +23,17 @@ av appen**.
 
 Ingenting ennå.
 
+## [0.3.1] — 2026-09-23
+
+### Rettet
+
+- **Kartet frøs (Android) eller mistet flisene (iOS) ved to-finger-bevegelse
+  på maks zoom.** CRS-en hadde bare nivå 0–18, så `crs.zoom()` ga `Infinity`
+  når fingrene gled fra hverandre på z18. Leaflets sprett ved zoomgrensen lot
+  verdien gå rett inn i kartet: feil målestokk, `NaN`-skalering og alle fliser
+  fjernet. Rettet med ett ekstra oppløsningsnivå i CRS-en og
+  `bounceAtZoomLimits: false`. Rutenettet regner nå oppløsningen fra CRS-en.
+
 ## [0.3.0] — 2026-09-21
 
 ### Lagt til
