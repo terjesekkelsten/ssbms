@@ -28,8 +28,12 @@ const SSBMSMap = (() => {
 
   function buildCRS(z) {
     const m = SSBMSGeo.MATRIX[z];
+    // Ett nivå over z18. Uten det gir pinch på maks zoom crs.zoom() = Infinity:
+    // kartet regnes i feil målestokk og alle fliser fjernes (v0.3.1).
+    // Kartverket-nivåene og maxZoom 18 er uendret.
+    const res = SSBMSGeo.RESOLUTIONS.concat([SSBMSGeo.RESOLUTIONS[18] / 2]);
     return new L.Proj.CRS(m.epsg, proj4.defs(m.epsg), {
-      resolutions: SSBMSGeo.RESOLUTIONS,
+      resolutions: res,
       origin: m.origin,
       bounds: L.bounds(
         [m.origin[0], 9045984 - SSBMSGeo.RESOLUTIONS[0] * 256 * 64],
@@ -93,7 +97,7 @@ const SSBMSMap = (() => {
       const minN = Math.min(...corners.map(c => c.n));
       const maxN = Math.max(...corners.map(c => c.n));
 
-      const res = SSBMSGeo.RESOLUTIONS[Math.round(m.getZoom())] || m.getZoom();
+      const res = 1 / m.options.crs.scale(m.getZoom());   // riktig også ved brøkzoom
       const step = SSBMSGeo.gridStep(res);
       if ((maxE - minE) / step > 400) return; // sikkerhetsventil
 
@@ -178,6 +182,7 @@ const SSBMSMap = (() => {
       attributionControl: true,
       tap: false,
       doubleClickZoom: false,   // dobbelttrykk er reservert til hurtighandling
+      bounceAtZoomLimits: false, // ellers løper pinch-zoom forbi 18 (v0.3.1)
       preferCanvas: true
     });
 

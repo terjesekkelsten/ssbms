@@ -10,8 +10,8 @@ window.SSBMS_CONFIG = {
      Meny -> Sesjonsinfo. Poenget er at du i felt kan lese av hvilken versjon
      telefonen faktisk kjorer - en app som har hengt igjen i cachen ser ellers
      helt lik ut som den nye. */
-  version: '0.3.0',
-  released: '2026-09-21',
+  version: '0.3.1',
+  released: '2026-09-23',
 
   /* Supabase. La stå tom for lokal modus (synker kun faner på samme maskin).
    *
